@@ -32,13 +32,12 @@
 int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
 
-struct Clock {
-	unsigned long nanoTime, secoTime;
-};
+/* RESOURCE TABLE */
+int res[] = { 10, 2, 5, 5, 5, 2, 2, 3, 3, 1,
+	4, 4, 4, 6, 6, 6, 7, 8, 8, 9 };
 
 int main(int argc, char * argv[]){
 	/* INIT VARIABLES */
-	struct Clock clock = {1e9,clock.nanoTime/1e9};
 	int procC = 0;
 	int procTotal = 0;
 	pid_t pid;
@@ -52,8 +51,16 @@ int main(int argc, char * argv[]){
 	size_t clockSize = sizeof(unsigned long) * 2;
 	int fd_shm0 = shm_open("CLOCK", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm0, clockSize );
-	unsigned long * clockPtr = mmap(0, clockSize, PROT_WRITE, MAP_SHARED, fd_shm0, 0);
+	unsigned long * clockPtr = (unsigned long*)mmap(0, clockSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm0, 0);
 	* clockPtr = 0;
+	/* RESOURCES IN SHARED MEMORY */
+	size_t rescSize = sizeof(int) * 20;
+	int fd_shm1 = shm_open("RESC", O_CREAT | O_RDWR, 0666);
+	ftruncate( fd_shm1, rescSize);
+	int * rescPtr = (int*)mmap(0, rescSize, PROT_WRITE, MAP_SHARED, fd_shm1, 0);
+	for(int i = 0; i < 20; i++){
+		rescPtr[i] = res[i];
+	}	
 
 	while(procTotal < 30){
 		if(getRandomNumber(0,100) <= 33){
@@ -70,8 +77,8 @@ int main(int argc, char * argv[]){
 		}
 	}
 	while((pid = wait(NULL)) > 0);
-	printf("%lu : %lu\n", clock.nanoTime, clock.secoTime);
 	sem_unlink("/SEMA");
+	sem_destroy(semaphore);
 	sem_unlink("CLOCK");
 	return 0;
 }

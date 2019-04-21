@@ -40,17 +40,20 @@ int main(int argc, char * argv[]){
 		perror("Failed to block semaphore");
 		return 1;
 	}
-
 	/* CRITICAL AREA */
-
 	/* READ SHARED MEMORY */
 	int fd_shm0 = shm_open("CLOCK", O_RDWR, 0666);
-	unsigned long * clockPtr = mmap(0, sizeof(unsigned long)*2, PROT_WRITE, MAP_SHARED, fd_shm0, 0);
+	unsigned long * clockPtr = (unsigned long*)mmap(0, sizeof(unsigned long)*2, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm0, 0);
+	int fd_shm1 = shm_open("RESC", O_RDWR, 0666);
+	int * rescPtr = (int*)mmap(0, sizeof(int)*20, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm1, 0);
 	
-
 	* clockPtr += 5e9;
 	printf("\t\t\t--> Time: %lu\n", *clockPtr);
+	printf("\t\t\t--> %d %d %d\n", rescPtr[0], rescPtr[1], rescPtr[2]);
 	
+
+
+
 
 
 	
