@@ -24,8 +24,8 @@
 #define FLAGS (O_RDWR | O_EXCL)
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
-int getnamed(char *name, sem_t **sem, int val);
 int getRandomNumber(int low, int high);
+int getnamed(char *name, sem_t **sem, int val);
 pid_t r_wait(int * stat_loc);
 
 int main(int argc, char * argv[]){
@@ -71,6 +71,16 @@ int main(int argc, char * argv[]){
 	exit(0);
 }
 
+
+int getRandomNumber(int low, int high){
+	/* get random number within range */
+	int num;
+	for ( int i = 0; i < 2; i++ ){
+		num = (rand() % (high - low + 1)) + low;
+	}
+	return num;
+}
+
 int getnamed(char *name, sem_t **sem, int val){
 	/* a function to access a named seamphore, creating it if it dosn't already exist */
 	while(((*sem = sem_open(name, FLAGS , PERMS , val)) == SEM_FAILED) && (errno == EINTR));
@@ -82,15 +92,6 @@ int getnamed(char *name, sem_t **sem, int val){
 	if(*sem != SEM_FAILED)
 		return 0;
 	return -1;	
-}
-
-int getRandomNumber(int low, int high){
-	/* get random number within range */
-	int num;
-	for ( int i = 0; i < 2; i++ ){
-		num = (rand() % (high - low + 1)) + low;
-	}
-	return num;
 }
 
 pid_t r_wait(int * stat_loc){
