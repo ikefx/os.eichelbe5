@@ -31,15 +31,20 @@
 
 int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
+void sigintHandler(int sig_num);
 
 /* RESOURCE TABLE */
 int res[] = { 10, 2, 5, 5, 5, 2, 2, 3, 3, 1,
 	4, 4, 4, 6, 6, 6, 7, 8, 8, 9 };
 
 int main(int argc, char * argv[]){
+	printf("\t\t--> OSS START <--\n");
+	signal(SIGINT, sigintHandler);
+
 	/* INIT VARIABLES */
 	int procC = 0;
 	int procTotal = 0;
+	unsigned long previousTime = 0;
 	pid_t pid;
 	/* SEMAPHORE */
 	sem_t * semaphore;
@@ -61,22 +66,36 @@ int main(int argc, char * argv[]){
 	for(int i = 0; i < 20; i++){
 		rescPtr[i] = res[i];
 	}	
+	/* WHILE TOTAL PROCESSES < 30 OR CHILDREN INCOMPELETE 	*
+ 	*  INCREASE CLOCK AND POSSIBLY CREATE ANOTHER CHILD 	*/ 	
+	while(procTotal < 30 || (pid = wait(NULL)) > 0){
 
-	while(procTotal < 30){
-		if(getRandomNumber(0,100) <= 33){
-			procC++;
-			procTotal++;
-			if(procC > 18){
-				wait(NULL);
-				procC--;
-			}
-			if((pid = fork()) == 0){
-				char * args[] = {"./user", '\0'};
-				execvp("./user", args);
+		/* RUN DEADLOCK PREVENTION */
+		if(*clockPtr - previousTime >= (unsigned long)1e9 && procC > 0){
+			printf("Deadlock Prevent Execute --> %lu\n", *clockPtr);
+			previousTime = 0;
+		}
+		* clockPtr += 5e8;
+		if(procTotal < 30){
+			srand(*clockPtr * time(NULL));
+			if(getRandomNumber(0,100) <= 33){
+				procC++;
+				procTotal++;
+				if(procC > 18){
+					wait(NULL);
+					procC--;
+				}
+				if((pid = fork()) == 0){
+					char * args[] = {"./user", '\0'};
+					execvp("./user", args);
+				}
 			}
 		}
+		previousTime += *clockPtr;
+
 	}
-	while((pid = wait(NULL)) > 0);
+
+	printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
 	sem_unlink("/SEMA");
 	sem_destroy(semaphore);
 	sem_unlink("CLOCK");
@@ -104,4 +123,14 @@ int getnamed(char *name, sem_t **sem, int val){
 	if(*sem != SEM_FAILED)
 		return 0;
 	return -1;	
+}
+
+void sigintHandler(int sig_num){
+	/* CTRL C KILL */
+	signal(SIGINT, sigintHandler);
+	printf("\nTerminating all...\n");
+	shm_unlink("CLOCK");
+	shm_unlink("RESC");
+	shm_unlink("/SEMA");
+	exit(0);
 }

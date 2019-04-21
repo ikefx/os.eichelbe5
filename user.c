@@ -47,9 +47,10 @@ int main(int argc, char * argv[]){
 	int fd_shm1 = shm_open("RESC", O_RDWR, 0666);
 	int * rescPtr = (int*)mmap(0, sizeof(int)*20, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm1, 0);
 	
-	* clockPtr += 5e9;
-	printf("\t\t\t--> Time: %lu\n", *clockPtr);
-	printf("\t\t\t--> %d %d %d\n", rescPtr[0], rescPtr[1], rescPtr[2]);
+//	printf("\t\t\t--> Time Created: %lu\n", *clockPtr);
+	*clockPtr += 2.5e8;
+
+//	printf("\t\t\t--> Time Terminated: %lu\n", *clockPtr);
 	
 
 
@@ -71,6 +72,8 @@ int main(int argc, char * argv[]){
 		perror("sem_close() error in child");
 	}
 	shm_unlink("CLOCK");
+	shm_unlink("RESC");
+	shm_unlink("/SEMA");
 	exit(0);
 }
 
