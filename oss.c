@@ -29,6 +29,7 @@
 #define FLAGS (O_CREAT | O_EXCL)
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
+void printResTable(int * table);
 int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
 void sigintHandler(int sig_num);
@@ -37,10 +38,13 @@ void sigintHandler(int sig_num);
 int res[] = { 10, 2, 5, 5, 5, 2, 2, 3, 3, 1,
 	4, 4, 4, 6, 6, 6, 7, 8, 8, 9 };
 
-int main(int argc, char * argv[]){
-	printf("\t\t--> OSS START <--\n");
-	signal(SIGINT, sigintHandler);
+/* PROCESS COMPLETE BEFORE TERMINATE */
+const int max = 5;
 
+int main(int argc, char * argv[]){
+	signal(SIGINT, sigintHandler);
+	printf("\t\t--> OSS START <--\n");
+	srand(getpid());
 	/* INIT VARIABLES */
 	int procC = 0;
 	int procTotal = 0;
@@ -59,25 +63,25 @@ int main(int argc, char * argv[]){
 	unsigned long * clockPtr = (unsigned long*)mmap(0, clockSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm0, 0);
 	* clockPtr = 0;
 	/* RESOURCES IN SHARED MEMORY */
-	size_t rescSize = sizeof(int) * 20;
+	size_t rescSize = sizeof(int) * 21;
 	int fd_shm1 = shm_open("RESC", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm1, rescSize);
 	int * rescPtr = (int*)mmap(0, rescSize, PROT_WRITE, MAP_SHARED, fd_shm1, 0);
 	for(int i = 0; i < 20; i++){
 		rescPtr[i] = res[i];
 	}	
+
 	/* WHILE TOTAL PROCESSES < 30 OR CHILDREN INCOMPELETE 	*
  	*  INCREASE CLOCK AND POSSIBLY CREATE ANOTHER CHILD 	*/ 	
-	while(procTotal < 30 || (pid = wait(NULL)) > 0){
-
+	while(procTotal < max || (pid = wait(NULL)) > 0){
 		/* RUN DEADLOCK PREVENTION */
 		if(*clockPtr - previousTime >= (unsigned long)1e9 && procC > 0){
-			printf("Deadlock Prevent Execute --> %lu\n", *clockPtr);
+		//	printf("Deadlock Prevent Execute --> %lu\n", *clockPtr);
 			previousTime = 0;
 		}
 		* clockPtr += 5e8;
-		if(procTotal < 30){
-			srand(*clockPtr * time(NULL));
+		if(procTotal < max){
+		
 			if(getRandomNumber(0,100) <= 33){
 				procC++;
 				procTotal++;
@@ -94,14 +98,24 @@ int main(int argc, char * argv[]){
 		previousTime += *clockPtr;
 
 	}
-
+	//printResTable(rescPtr);
+	printf("\nOSS: %d Processes total were made.\n", procTotal);
 	printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
 	sem_unlink("/SEMA");
 	sem_destroy(semaphore);
 	sem_unlink("CLOCK");
+	sem_unlink("RESC");
 	return 0;
 }
 
+void printResTable(int * table){
+	printf("\t---- RESOURCE TABLE ----\n");
+	for(int i = 0; i < 20; i++){
+		if(i == 10) printf("\n");
+		printf(" %d ", res[i]);
+	}
+	printf("\n\t---- ------------- ----\n");
+}
 
 int getRandomNumber(int low, int high){
 	/* get random number within range */
@@ -129,6 +143,7 @@ void sigintHandler(int sig_num){
 	/* CTRL C KILL */
 	signal(SIGINT, sigintHandler);
 	printf("\nTerminating all...\n");
+	kill(0,SIGTERM);
 	shm_unlink("CLOCK");
 	shm_unlink("RESC");
 	shm_unlink("/SEMA");
