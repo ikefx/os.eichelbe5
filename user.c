@@ -42,12 +42,22 @@ int main(int argc, char * argv[]){
 	time_t t, start, stop;
 	start = time(NULL);
 	int pname = atoi(argv[1]);
+	int max = atoi(argv[2]);
+	int maxReso = atoi(argv[3]);
 	sem_t * semaphore;
 	/* READ SHARED MEMORY */
 	int fd_shm0 = shm_open("CLOCK", O_RDWR, 0666);
 	unsigned long * clockPtr = (unsigned long*)mmap(0, sizeof(unsigned long)*2, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm0, 0);
+
+	/* RESOURCE REQUEST IN SHARED MEMORY */
+	size_t resoSize = sizeof(int) * max;
 	int fd_shm1 = shm_open("RESC", O_RDWR, 0666);
-	int * rescPtr = (int*)mmap(0, sizeof(int)*20, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm1, 0);
+	ftruncate( fd_shm1, resoSize);
+	int * resoPtr = (int*)mmap(0, resoSize, PROT_WRITE, MAP_SHARED, fd_shm1, 0);
+
+
+
+	/* OLD THINGS */
 	int fd_shm2 = shm_open("REQU", O_RDWR, 0666);
 	int * requPtr = (int*)mmap(0, sizeof(int)*20, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm2, 0);
 	int fd_shm3 = shm_open("PIDS", O_RDWR, 0666);
@@ -72,12 +82,23 @@ int main(int argc, char * argv[]){
 			if(!requestedReso && diceRoll >= 50){
 				writeString("output.txt", pname, *clockPtr, "child requesting resource");
 				requestedReso = true;
+				/* PLACE REQUEST IN SHARED MEMORY */
+				int randReso = getRandomNumber(1, maxReso);
+				sem_wait(semaphore);
+				resoPtr[pname-1] = randReso;
+				sem_post(semaphore);
 			}
 			/* PROCESS RELEASES ITS RESOURCE (IF ACCEPTED BY PARENT)*/
-			if(requestedReso && start < start+10e9 && diceRoll <= 10) {
+			if(requestedReso && !releasedReso && start < start+10e9 && diceRoll <= 20) {
+				sem_wait(semaphore);
 				writeString("output.txt", pname, *clockPtr, "child releasing resource");
+				resoPtr[pname-1] = 0;
+				printf("\t\tChild :%2d:%5d releasing resource\n", pname, getpid());
+				fflush(stdout);
+				sem_post(semaphore);
 				requestedReso = false;
 				releasedReso  = true;
+
 			}
 
 		}
@@ -85,8 +106,10 @@ int main(int argc, char * argv[]){
 		diceRoll = getRandomNumber(0,100);
 		sem_wait(semaphore);
 		if(releasedReso && *clockPtr >= (unsigned long)bound*(unsigned long)1e9 && diceRoll <= 10){	
+			
 			printf("\t\t\t\t  -- Child %2d:%5d completes ----------------------\n", pname, getpid());
 			writeOut("output.txt", pname, *clockPtr);
+			resoPtr[pname-1] = 0;
 			sem_post(semaphore);
 			break;
 		}

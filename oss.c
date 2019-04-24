@@ -51,6 +51,7 @@ int main(int argc, char * argv[]){
 	fflush(stdout);
 	srand(time(NULL));
 	/* INIT VARIABLES */
+	int resourceMax = 20 + getRandomNumber(-4,4);
 	int procC = 0;
 	int childPid;
 	int procTotal = 0;
@@ -67,18 +68,18 @@ int main(int argc, char * argv[]){
 	ftruncate( fd_shm0, clockSize );
 	unsigned long * clockPtr = (unsigned long*)mmap(0, clockSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm0, 0);
 	* clockPtr = 0;
-	/* RESOURCES IN SHARED MEMORY */
-	size_t rescSize = sizeof(int) * 20;
+	/* RESOURCE REQUEST IN SHARED MEMORY */
+	size_t resoSize = sizeof(int) * max;
 	int fd_shm1 = shm_open("RESC", O_CREAT | O_RDWR, 0666);
-	ftruncate( fd_shm1, rescSize);
-	int * rescPtr = (int*)mmap(0, rescSize, PROT_WRITE, MAP_SHARED, fd_shm1, 0);
+	ftruncate( fd_shm1, resoSize);
+	int * resoPtr = (int*)mmap(0, resoSize, PROT_WRITE, MAP_SHARED, fd_shm1, 0);
 	for(int i = 0; i < 20; i++){
-		rescPtr[i] = res[i];
+		resoPtr[i] = 0;
 	}
 	/* REQUEST IN SHARED MEMORY */	
 	int fd_shm2 = shm_open("REQU", O_CREAT | O_RDWR, 0666);
-	ftruncate( fd_shm2, rescSize);
-	int * requPtr = (int*)mmap(0, rescSize, PROT_WRITE, MAP_SHARED, fd_shm2, 0);
+	ftruncate( fd_shm2, resoSize);
+	int * requPtr = (int*)mmap(0, resoSize, PROT_WRITE, MAP_SHARED, fd_shm2, 0);
 	for(int i = 0; i < 20; i++){
 		requPtr[i] = 0;
 	}
@@ -99,10 +100,12 @@ int main(int argc, char * argv[]){
 				}
 				char childName[128];
 				char maxProces[128];
+				char maxResour[128];
 				sprintf(childName, "%d", procTotal);
 				sprintf(maxProces, "%d", max);
+				sprintf(maxResour, "%d", resourceMax);
 				if((childPid = fork()) == 0){
-					char * args[] = {"./user", childName, maxProces, '\0'};
+					char * args[] = {"./user", childName, maxProces, maxResour, '\0'};
 					execvp("./user", args);
 				}
 			}
@@ -112,7 +115,21 @@ int main(int argc, char * argv[]){
 		if(procTotal > 0 && (*clockPtr % (unsigned long)1e9) == 0){
 			writeOut("output.txt", *clockPtr, "");
 		}
+
+
+		sem_wait(semaphore);
+		for(int i = 0; i < max; i++){
+			printf("%d ", resoPtr[i]);
+		}
+		printf("\n");
+		sem_post(semaphore);
+	
+
+
 		if(*clockPtr > 180e9 && procTotal >= max) break;
+
+
+
 	}
 	time_t start = time(NULL);
 	time_t stop;
@@ -131,7 +148,7 @@ int main(int argc, char * argv[]){
 			sem_unlink("/SEMA");
 			sem_destroy(semaphore);
 			shmdt(requPtr);
-			shmdt(rescPtr);
+			shmdt(resoPtr);
 			shmdt(pidPtr);
 			sem_unlink("CLOCK");
 			sem_unlink("RESC");
@@ -139,6 +156,17 @@ int main(int argc, char * argv[]){
 			sem_unlink("PIDS");
 			exit(0);
 		}
+
+		sem_wait(semaphore);
+		for(int i = 0; i < max; i++){
+			printf("%d ", resoPtr[i]);
+		}
+		printf("\n");
+		sem_post(semaphore);
+
+
+
+
 	}
 		/* RUN DEADLOCK PREVENTION EVERY WHOLE SECOND */;
 //		sem_wait(semaphore);
@@ -151,12 +179,20 @@ int main(int argc, char * argv[]){
 //			}
 //		}
 
+	sem_wait(semaphore);
+	for(int i = 0; i < max; i++){
+		printf("%d ", resoPtr[i]);
+	}
+	printf("\n");
+	sem_post(semaphore);
+	
 	printf("\nOSS: %d Processes total were made.\n", procTotal);
 	printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
+	
 	sem_unlink("/SEMA");
 	sem_destroy(semaphore);
 	shmdt(requPtr);
-	shmdt(rescPtr);
+	shmdt(resoPtr);
 	shmdt(pidPtr);
 	sem_unlink("CLOCK");
 	sem_unlink("RESC");
