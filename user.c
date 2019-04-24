@@ -55,6 +55,10 @@ int main(int argc, char * argv[]){
 		perror("Failed to create named semaphore");
 		return 1;
 	}
+	sem_wait(semaphore);
+	unsigned long start = *clockPtr;
+	sem_post(semaphore);
+
 	srand(getpid()*time(NULL));
 	int bound = getRandomNumber(0,100);
 	printf("\t-- Child %d:%d Created -------------------------\n", pname, getpid());
@@ -63,15 +67,14 @@ int main(int argc, char * argv[]){
 		int diceRoll = getRandomNumber(0,100);
 		/* CHANCE PROCESS REQUESTS|RELEASES A RESOURCE */
 		if(diceRoll > 80){
-//			srand(getpid()*time(NULL) * *clockPtr);
 			int reqrelroll = getRandomNumber(0,100);
 			/* PROCESS REQUESTS A RESOURCE */
-			if(!requestedReso && reqrelroll >= 66){
+			if(!requestedReso && reqrelroll >= 50){
 				writeString("output.txt", pname, *clockPtr, "child requesting resource");
 				requestedReso = true;
 			}
 			/* PROCESS RELEASES ITS RESOURCE (IF ACCEPTED BY PARENT)*/
-			if(requestedReso && reqrelroll <= 33) {
+			if(requestedReso && reqrelroll < 50) {
 				writeString("output.txt", pname, *clockPtr, "child releasing resource");
 				requestedReso = false;
 				releasedReso  = true;
@@ -83,10 +86,10 @@ int main(int argc, char * argv[]){
 		}
 		*clockPtr += 5e8;
 	}
-	sem_wait(semaphore);
+//	sem_wait(semaphore);
 	printf("\t\t\t\t-- Child %d completes ----------------------\n", getpid());
 	writeOut("output.txt", pname, *clockPtr);
-	sem_post(semaphore);
+//	sem_post(semaphore);
 	if(r_wait(NULL) == -1){
 		return 1;
 	}

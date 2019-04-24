@@ -109,11 +109,13 @@ int main(int argc, char * argv[]){
 			}
 		}
 		* clockPtr += 5e8;
-		if(*clockPtr > 180e9 || procTotal >= max) break;
-		if(procTotal > 0) writeOut("output.txt", *clockPtr, " in while loop ");
+		/* WILL INTERJECT IN CHILD WHILE LOOP : EVERY SECOND*/
+		if(procTotal > 0 && (*clockPtr % (unsigned long)1e9) == 0){
+			writeOut("output.txt", *clockPtr, "");
+		}
+		if(*clockPtr > 180e9 && procTotal >= max) break;
 	}
 	while((pid = wait(NULL)) > 0){
-		//printf("%lu\n", *clockPtr);
 		writeOut("output.txt", *clockPtr, " in wait loop ");
 	}
 
@@ -146,7 +148,7 @@ void writeOut(char * name, unsigned long time, char * string){
 	FILE *fp;
 	fp = fopen(name, "a");
 	char wroteline[355];
-	sprintf(wroteline, "\tParent does something at %lu %s\n", time, string);
+	sprintf(wroteline, "Deadlock examine at %.0lu:%lu %s\n", (time / (unsigned long) 1e9), time, string);
 	fprintf(fp, wroteline);
 	fclose(fp);
 	return;
