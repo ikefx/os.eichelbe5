@@ -39,6 +39,8 @@ int main(int argc, char * argv[]){
 	bool releasedReso = false;
 	bool isWaiting = false;
 	bool hadToWait = false;
+	time_t t, start, stop;
+	start = time(NULL);
 	int pname = atoi(argv[1]);
 	sem_t * semaphore;
 	/* READ SHARED MEMORY */
@@ -56,40 +58,59 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 	sem_wait(semaphore);
-	unsigned long start = *clockPtr;
+	srand(getpid());
+	unsigned long startClk = *clockPtr;
+	int bound = getRandomNumber(1,100);
+	printf("\t-- Child %2d:%5d Created -------------------------\n", pname, getpid());
 	sem_post(semaphore);
-
-	srand(getpid()*time(NULL));
-	int bound = getRandomNumber(0,100);
-	printf("\t-- Child %d:%d Created -------------------------\n", pname, getpid());
 	while(1){
-		srand(getpid()*time(NULL)* *clockPtr);
 		int diceRoll = getRandomNumber(0,100);
 		/* CHANCE PROCESS REQUESTS|RELEASES A RESOURCE */
-		if(diceRoll > 80){
-			int reqrelroll = getRandomNumber(0,100);
+		if(diceRoll > 75){
+			diceRoll = getRandomNumber(0,100);
 			/* PROCESS REQUESTS A RESOURCE */
-			if(!requestedReso && reqrelroll >= 50){
+			if(!requestedReso && diceRoll >= 50){
 				writeString("output.txt", pname, *clockPtr, "child requesting resource");
 				requestedReso = true;
 			}
 			/* PROCESS RELEASES ITS RESOURCE (IF ACCEPTED BY PARENT)*/
-			if(requestedReso && reqrelroll < 50) {
+			if(requestedReso && start < start+10e9 && diceRoll <= 10) {
 				writeString("output.txt", pname, *clockPtr, "child releasing resource");
 				requestedReso = false;
 				releasedReso  = true;
 			}
+
 		}
 		/* CHANCE PROCESS TERMINATES ITSELF */
-		if(releasedReso && *clockPtr >= (unsigned long)bound*(unsigned long)1e9){
+		diceRoll = getRandomNumber(0,100);
+		sem_wait(semaphore);
+		if(releasedReso && *clockPtr >= (unsigned long)bound*(unsigned long)1e9 && diceRoll <= 10){	
+			printf("\t\t\t\t  -- Child %2d:%5d completes ----------------------\n", pname, getpid());
+			writeOut("output.txt", pname, *clockPtr);
+			sem_post(semaphore);
 			break;
 		}
-		*clockPtr += 5e8;
+		sem_post(semaphore);
+		//sem_wait(semaphore);
+		//*clockPtr += 5e8;
+	//	sem_post(semaphore);
+		stop = time(NULL);
+		if(stop - start > 30){
+			printf("\t\tTimeout occured, killing %d:%d\n", pname, getpid());
+			if(r_wait(NULL) == -1){
+				return 1;
+			}
+			if(sem_close(semaphore) < 0){
+				perror("sem_close() error in child");
+			}
+			shm_unlink("CLOCK");
+			shm_unlink("RESC");
+			shm_unlink("REQU");
+			shm_unlink("PIDS");
+			shm_unlink("/SEMA");
+			exit(0);
+		}
 	}
-//	sem_wait(semaphore);
-	printf("\t\t\t\t-- Child %d completes ----------------------\n", getpid());
-	writeOut("output.txt", pname, *clockPtr);
-//	sem_post(semaphore);
 	if(r_wait(NULL) == -1){
 		return 1;
 	}

@@ -42,19 +42,18 @@ int res[] = { 10, 2, 5, 5, 5, 2, 2, 3, 3, 1,
 	4, 4, 4, 6, 6, 6, 7, 8, 8, 9 };
 
 /* PROCESS COMPLETE BEFORE TERMINATE */
-const int max = 2;
+const int max = 20;
 
 int main(int argc, char * argv[]){
 	signal(SIGINT, sigintHandler);
 	printf("\t\t--> OSS START <--\n\t\tParent PID: %d\n\n",getpid());
 	clearOldOutput();
 	fflush(stdout);
-	srand(getpid());
+	srand(time(NULL));
 	/* INIT VARIABLES */
 	int procC = 0;
 	int childPid;
 	int procTotal = 0;
-	unsigned long previousTime = 0;
 	pid_t pid;
 	/* SEMAPHORE */
 	sem_t * semaphore;
@@ -91,7 +90,7 @@ int main(int argc, char * argv[]){
  	*  INCREASE CLOCK AND POSSIBLY CREATE ANOTHER CHILD 	*/ 	
 	while(1){
 		if(procTotal < max && *clockPtr > 1e9){	
-			if(getRandomNumber(0,100) <= 10){
+			if(getRandomNumber(0,100) <= 25){
 				procC++;
 				procTotal++;		
 				if(procC > 18){
@@ -115,10 +114,32 @@ int main(int argc, char * argv[]){
 		}
 		if(*clockPtr > 180e9 && procTotal >= max) break;
 	}
+	time_t start = time(NULL);
+	time_t stop;
 	while((pid = wait(NULL)) > 0){
-		writeOut("output.txt", *clockPtr, " in wait loop ");
+		sem_wait(semaphore);
+		if(*clockPtr % (unsigned long)1e9 == 0){
+			writeOut("output.txt", *clockPtr, " in wait loop ");
+		}
+		* clockPtr += 5e8;
+		sem_post(semaphore);
+		stop = time(NULL);
+		if(stop - start > 120){
+			printf("OSS: Timeout occured, shutting down.\n");			
+			printf("\nOSS: %d Processes total were made.\n", procTotal);
+			printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
+			sem_unlink("/SEMA");
+			sem_destroy(semaphore);
+			shmdt(requPtr);
+			shmdt(rescPtr);
+			shmdt(pidPtr);
+			sem_unlink("CLOCK");
+			sem_unlink("RESC");
+			sem_unlink("REQU");
+			sem_unlink("PIDS");
+			exit(0);
+		}
 	}
-
 		/* RUN DEADLOCK PREVENTION EVERY WHOLE SECOND */;
 //		sem_wait(semaphore);
 //		if(*clockPtr - previousTime >= (unsigned long)1e9/3){	
