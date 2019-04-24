@@ -29,6 +29,8 @@
 #define FLAGS (O_CREAT | O_EXCL)
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
+void clearOldOutput();
+void writeOut(char * name,  unsigned long time, char * string);
 bool requestExceeds(int * resource, int * request);
 void printTable(int * resource, int * request);
 int getRandomNumber(int low, int high);
@@ -45,6 +47,8 @@ const int max = 2;
 int main(int argc, char * argv[]){
 	signal(SIGINT, sigintHandler);
 	printf("\t\t--> OSS START <--\n\t\tParent PID: %d\n\n",getpid());
+	clearOldOutput();
+	fflush(stdout);
 	srand(getpid());
 	/* INIT VARIABLES */
 	int procC = 0;
@@ -85,29 +89,34 @@ int main(int argc, char * argv[]){
 	int * pidPtr = (int*)mmap(0, sizeof(getpid()), PROT_WRITE, MAP_SHARED, fd_shm3, 0);
 	/* WHILE TOTAL PROCESSES < 30 OR CHILDREN INCOMPELETE 	*
  	*  INCREASE CLOCK AND POSSIBLY CREATE ANOTHER CHILD 	*/ 	
-//	while(procTotal < max || (pid = wait(NULL)) > 0){
-	while(procTotal < max || (pid = wait(NULL)) > 0){
-		sem_wait(semaphore);
-		previousTime += *clockPtr;
-		sem_post(semaphore);
+	while(1){
 		if(procTotal < max && *clockPtr > 1e9){	
 			if(getRandomNumber(0,100) <= 10){
 				procC++;
-				procTotal++;
+				procTotal++;		
 				if(procC > 18){
-						wait(NULL);
+					wait(NULL);
 					procC--;
 				}
+				char childName[128];
+				char maxProces[128];
+				sprintf(childName, "%d", procTotal);
+				sprintf(maxProces, "%d", max);
 				if((childPid = fork()) == 0){
-					char buffer[128];
-					char * args[] = {"./user", '\0'};
+					char * args[] = {"./user", childName, maxProces, '\0'};
 					execvp("./user", args);
 				}
 			}
 		}
-		sem_wait(semaphore);
 		* clockPtr += 5e8;
-		sem_post(semaphore);
+		if(*clockPtr > 180e9 || procTotal >= max) break;
+		if(procTotal > 0) writeOut("output.txt", *clockPtr, " in while loop ");
+	}
+	while((pid = wait(NULL)) > 0){
+		//printf("%lu\n", *clockPtr);
+		writeOut("output.txt", *clockPtr, " in wait loop ");
+	}
+
 		/* RUN DEADLOCK PREVENTION EVERY WHOLE SECOND */;
 //		sem_wait(semaphore);
 //		if(*clockPtr - previousTime >= (unsigned long)1e9/3){	
@@ -118,43 +127,7 @@ int main(int argc, char * argv[]){
 //				printf("Parent interjects\n");
 //			}
 //		}
-		previousTime = 0;
-		printf("PARENT\n");
-	}
-//	while((pid = wait(NULL)) > 0 ){
-		/* RUN DEADLOCK PREVENTION EVERY WHOLE SECOND */;
-	//	sem_wait(semaphore);
-	//	if(*clockPtr - previousTime >= (unsigned long)1e9){
-	//		if(requestExceeds(rescPtr, requPtr)){
-				//printf("---> PARENT DETECTS RESOURCE ERROR: 1ST LOOP\n");
-				//printTable(rescPtr, requPtr);
-				//if(*pidPtr > 0){
-	//			printf("PARENT KILLING %d:%d\n", procC, *pidPtr);
-	//			printTable(rescPtr, requPtr);
-	//				kill(*pidPtr,SIGQUIT);
-	//			//}
-	//		}
-	//		previousTime = 0;
-	//	}
-	//	sem_post(semaphore);
-	//}
-	/* STAY IN LOOP WHILE CHILDREN RUNNING */
-//	while((pid = wait(NULL)) > 0){
-		/* CONTINUE DEADLOCK MONITORING */
-//		sem_wait(semaphore);
-//		if(*clockPtr - previousTime >= (unsigned long)1e9/5){
-//			if(requestExceeds(rescPtr, requPtr)){
-//				printf("---> PARENT DETECTS RESOURCE ERROR: 2ND LOOP\n");
-//				printTable(rescPtr, requPtr);
-//				printf("KILLING %d\n", getpid());
-//				kill(pid, SIGKILL);
-//			}
-//			previousTime = 0;
-//		}
-//		*clockPtr += 5e8;
-//		previousTime += *clockPtr;
-//		sem_post(semaphore);
-//	}
+
 	printf("\nOSS: %d Processes total were made.\n", procTotal);
 	printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
 	sem_unlink("/SEMA");
@@ -167,6 +140,25 @@ int main(int argc, char * argv[]){
 	sem_unlink("REQU");
 	sem_unlink("PIDS");
 	return 0;
+}
+
+void writeOut(char * name, unsigned long time, char * string){
+	FILE *fp;
+	fp = fopen(name, "a");
+	char wroteline[355];
+	sprintf(wroteline, "\tParent does something at %lu %s\n", time, string);
+	fprintf(fp, wroteline);
+	fclose(fp);
+	return;
+}
+
+void clearOldOutput(){
+	/* DELETE PREVIOUS LOG.TXT FILE */
+	int status1 = remove("output.txt");
+	if(status1 == 0){
+		printf("--> Previous %s deleted.\n\n", "output.txt");
+	}
+	return;
 }
 
 bool requestExceeds(int * resource, int * request){

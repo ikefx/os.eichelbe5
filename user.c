@@ -25,17 +25,21 @@
 #define FLAGS O_RDWR
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
+void writeString(char * name, int child, unsigned long time, char * string);
+void writeOut(char * name, int child, unsigned long time);
 void printTable(int * resource, int * request);
 int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
 pid_t r_wait(int * stat_loc);
 
 int main(int argc, char * argv[]){
-	srand(getpid());
 	/* INIT VARIABLES */
 	int differentResourcesNeeded = 0;
+	bool requestedReso = false;
+	bool releasedReso = false;
 	bool isWaiting = false;
 	bool hadToWait = false;
+	int pname = atoi(argv[1]);
 	sem_t * semaphore;
 	/* READ SHARED MEMORY */
 	int fd_shm0 = shm_open("CLOCK", O_RDWR, 0666);
@@ -51,49 +55,44 @@ int main(int argc, char * argv[]){
 		perror("Failed to create named semaphore");
 		return 1;
 	}
-	/* RANDOMLY DETERMINE RESOURCES REQUIRED */
-	int requestedResources[20];
-	for(int i = 0; i < 20; i++){
-		requestedResources[i] = 0;
-		if(getRandomNumber(0,100) > 75){
-			differentResourcesNeeded++;
-			requestedResources[i] = getRandomNumber(1,rescPtr[i]);
-			sem_wait(semaphore);
-			requPtr[i] += requestedResources[i];
-			sem_post(semaphore);
+	srand(getpid()*time(NULL));
+	int bound = getRandomNumber(0,100);
+	printf("\t-- Child %d:%d Created -------------------------\n", pname, getpid());
+	while(1){
+		srand(getpid()*time(NULL)* *clockPtr);
+		int diceRoll = getRandomNumber(0,100);
+		/* CHANCE PROCESS REQUESTS|RELEASES A RESOURCE */
+		if(diceRoll > 80){
+//			srand(getpid()*time(NULL) * *clockPtr);
+			int reqrelroll = getRandomNumber(0,100);
+			/* PROCESS REQUESTS A RESOURCE */
+			if(!requestedReso && reqrelroll >= 66){
+				writeString("output.txt", pname, *clockPtr, "child requesting resource");
+				requestedReso = true;
+			}
+			/* PROCESS RELEASES ITS RESOURCE (IF ACCEPTED BY PARENT)*/
+			if(requestedReso && reqrelroll <= 33) {
+				writeString("output.txt", pname, *clockPtr, "child releasing resource");
+				requestedReso = false;
+				releasedReso  = true;
+			}
 		}
+		/* CHANCE PROCESS TERMINATES ITSELF */
+		if(releasedReso && *clockPtr >= (unsigned long)bound*(unsigned long)1e9){
+			break;
+		}
+		*clockPtr += 5e8;
 	}
-	printf("\t-- Child Create %d -------------------------\n", getpid());
-	/* REQUEST RESOURCES: SLEEP IF UNAVAILABLE */
-//	for(int i = 0; i < 1e9; i++);
-//	for(int i = 0; i < 20; i++){
-//		if(requestedResources[i] > 0){
-//			if(requPtr[i] > rescPtr[i]){
-//				printf("\t\t---> RESOURCE ERROR DETECTED IN CHILD:%d\n", getpid());
-//				fflush(stdout);
-//				isWaiting = true;
-//				if(isWaiting){
-//					for(int i = 0; i < 1e9/2; i++);
-//					*pidsPtr = getpid();
-//					if(requPtr[i] <= rescPtr[i])
-//						isWaiting = false;
-//				}
-//				break;
-//			}
-//		}
-//	}
-//	for(int i = 0; i < 20; i++){
-//		requPtr[i] -= requestedResources[i];
-//	}
-	sleep(1);
+	sem_wait(semaphore);
 	printf("\t\t\t\t-- Child %d completes ----------------------\n", getpid());
+	writeOut("output.txt", pname, *clockPtr);
+	sem_post(semaphore);
 	if(r_wait(NULL) == -1){
 		return 1;
 	}
 	if(sem_close(semaphore) < 0){
 		perror("sem_close() error in child");
 	}
-	printf("\tCHILD IS FINISHED\n");
 	shm_unlink("CLOCK");
 	shm_unlink("RESC");
 	shm_unlink("REQU");
@@ -102,6 +101,24 @@ int main(int argc, char * argv[]){
 	exit(0);
 }
 
+void writeString(char * name, int child, unsigned long time, char * string){
+	FILE *fp;
+	fp = fopen(name, "a");
+	char wroteline[355];
+	sprintf(wroteline, "\t\t\tChild %d:%d\n\t\t\t\t%s\n\t\t\t\t\tat %.0lu:%lu\n", child, getpid(), string, time/(unsigned long)1e9, time);
+	fprintf(fp, wroteline);
+	fclose(fp);
+	return;
+}
+void writeOut(char * name, int child, unsigned long time){
+	FILE *fp;
+	fp = fopen(name, "a");
+	char wroteline[355];
+	sprintf(wroteline, "\t\t\tChild %d:%d terminated at %.0lu:%lu\n", child, getpid(), time/(unsigned long)1e9, time);
+	fprintf(fp, wroteline);
+	fclose(fp);
+	return;
+}
 void printTable(int * resource, int * request){
 	printf("\t\t---------- RESOURCE TABLE ----------\n\t\t");
 	for(int i = 0; i < 20; i++){
