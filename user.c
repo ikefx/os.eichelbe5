@@ -25,23 +25,32 @@
 #define FLAGS O_RDWR
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
+void printTable(int * resource, int * request);
 int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
 pid_t r_wait(int * stat_loc);
-void sigintHandler(int sig_num);
 
 int main(int argc, char * argv[]){
-	signal(SIGINT, sigintHandler);
 	srand(getpid());
-	printf("-- Child begins -------------------------\n");
 	/* INIT VARIABLES */
 	int differentResourcesNeeded = 0;
+	bool isWaiting = false;
+	bool hadToWait = false;
 	sem_t * semaphore;
 	/* READ SHARED MEMORY */
 	int fd_shm0 = shm_open("CLOCK", O_RDWR, 0666);
 	unsigned long * clockPtr = (unsigned long*)mmap(0, sizeof(unsigned long)*2, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm0, 0);
 	int fd_shm1 = shm_open("RESC", O_RDWR, 0666);
-	int * rescPtr = (int*)mmap(0, sizeof(int)*21, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm1, 0);
+	int * rescPtr = (int*)mmap(0, sizeof(int)*20, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm1, 0);
+	int fd_shm2 = shm_open("REQU", O_RDWR, 0666);
+	int * requPtr = (int*)mmap(0, sizeof(int)*20, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm2, 0);
+	int fd_shm3 = shm_open("PIDS", O_RDWR, 0666);
+	int * pidsPtr = (int*)mmap(0, sizeof(getpid()), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm3, 0);
+	/* LOAD SEMAPHORE */	
+	if(getnamed("/SEMA", &semaphore, 1) == -1){
+		perror("Failed to create named semaphore");
+		return 1;
+	}
 	/* RANDOMLY DETERMINE RESOURCES REQUIRED */
 	int requestedResources[20];
 	for(int i = 0; i < 20; i++){
@@ -49,59 +58,62 @@ int main(int argc, char * argv[]){
 		if(getRandomNumber(0,100) > 75){
 			differentResourcesNeeded++;
 			requestedResources[i] = getRandomNumber(1,rescPtr[i]);
+			sem_wait(semaphore);
+			requPtr[i] += requestedResources[i];
+			sem_post(semaphore);
 		}
 	}
-
-	/* LOAD SEMAPHORE */	
-	if(getnamed("/SEMA", &semaphore, 1) == -1){
-		perror("Failed to create named semaphore");
-		return 1;
-	}
-	/* WAIT UNTIL ACCESSIBLE */
-	while(sem_wait(semaphore) == -1){
-		perror("Failed to block semaphore");
-		return 1;
-	}
-
+	printf("\t-- Child Create %d -------------------------\n", getpid());
 	/* REQUEST RESOURCES: SLEEP IF UNAVAILABLE */
-	for(int i = 0; i < 20; i++){
-		fflush(stdout);
-		if(requestedResources[i] > 0){
-			int temp = rescPtr[i];
-			printf("\t[R:%d] has %d available, requesting %d\t", i, temp, requestedResources[i]);
-			int newResult = temp - requestedResources[i];
-			if(newResult < 0){
-				printf("RESOURCE ERROR SLEEP --> %d\n", newResult);
-			}else{
-				printf("ATTEMPT COMPLETE THEN RELEASE--> %d\n", newResult);
-				temp -= requestedResources[i];
-	//			rescPtr[i] = temp;
-			}	
-		}
-	}	
-	printf("-- Child completes ----------------------\n");
-	
-	/* EXIT CRITICAL AREA*/
-	/* RELEASE SEMAPHORE */
-	while(sem_post(semaphore) == -1){
-		perror("failed to unlock semaphore");
-		return 1;
-	}
-		
+//	for(int i = 0; i < 1e9; i++);
+//	for(int i = 0; i < 20; i++){
+//		if(requestedResources[i] > 0){
+//			if(requPtr[i] > rescPtr[i]){
+//				printf("\t\t---> RESOURCE ERROR DETECTED IN CHILD:%d\n", getpid());
+//				fflush(stdout);
+//				isWaiting = true;
+//				if(isWaiting){
+//					for(int i = 0; i < 1e9/2; i++);
+//					*pidsPtr = getpid();
+//					if(requPtr[i] <= rescPtr[i])
+//						isWaiting = false;
+//				}
+//				break;
+//			}
+//		}
+//	}
+//	for(int i = 0; i < 20; i++){
+//		requPtr[i] -= requestedResources[i];
+//	}
+	sleep(1);
+	printf("\t\t\t\t-- Child %d completes ----------------------\n", getpid());
 	if(r_wait(NULL) == -1){
 		return 1;
 	}
 	if(sem_close(semaphore) < 0){
 		perror("sem_close() error in child");
 	}
-
 	printf("\tCHILD IS FINISHED\n");
 	shm_unlink("CLOCK");
 	shm_unlink("RESC");
+	shm_unlink("REQU");
+	shm_unlink("PIDS");
 	shm_unlink("/SEMA");
 	exit(0);
 }
 
+void printTable(int * resource, int * request){
+	printf("\t\t---------- RESOURCE TABLE ----------\n\t\t");
+	for(int i = 0; i < 20; i++){
+		printf("%2d ", resource[i]);
+	}
+	printf("\n\t\t");
+	for(int i = 0; i < 20; i++){
+		printf("%2d ", request[i]);
+	}
+	printf("\n\t\t---------- -------------- ----------\n");
+	fflush(stdout);
+}
 
 int getRandomNumber(int low, int high){
 	/* get random number within range */
@@ -130,15 +142,4 @@ pid_t r_wait(int * stat_loc){
 	int retval;
 	while(((retval = wait(stat_loc)) == -1) && (errno == EINTR));
 	return retval;
-}
-
-void sigintHandler(int sig_num){
-	/* CTRL C KILL */
-	signal(SIGINT, sigintHandler);
-	printf("\nTerminating all...\n");
-	kill(0,SIGTERM);
-	shm_unlink("CLOCK");
-	shm_unlink("RESC");
-	shm_unlink("/SEMA");
-	exit(0);
 }
