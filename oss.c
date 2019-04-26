@@ -111,28 +111,18 @@ int main(int argc, char * argv[]){
 			}
 		}
 		* clockPtr += 5e8;
-		/* WILL INTERJECT IN CHILD WHILE LOOP : EVERY SECOND*/
+		/* WILL INTERCEDE IN CHILD WHILE LOOP : EVERY SECOND */
 		if(procTotal > 0 && (*clockPtr % (unsigned long)1e9) == 0){
 			writeOut("output.txt", *clockPtr, "");
 		}
 
-
-		sem_wait(semaphore);
-		for(int i = 0; i < max; i++){
-			printf("%d ", resoPtr[i]);
-		}
-		printf("\n");
-		sem_post(semaphore);
-	
-
-
+		/* BREAK OUT OF WHILE LOOP */
 		if(*clockPtr > 180e9 && procTotal >= max) break;
-
-
 
 	}
 	time_t start = time(NULL);
 	time_t stop;
+	/* WAIT FOR INCOMPLETE PROCESS */
 	while((pid = wait(NULL)) > 0){
 		sem_wait(semaphore);
 		if(*clockPtr % (unsigned long)1e9 == 0){
@@ -140,8 +130,10 @@ int main(int argc, char * argv[]){
 		}
 		* clockPtr += 5e8;
 		sem_post(semaphore);
+
+		/* COMMIT SUICIDE IF HUNG : TIMEOUT HANDLING */
 		stop = time(NULL);
-		if(stop - start > 120){
+		if(stop - start > 90){
 			printf("OSS: Timeout occured, shutting down.\n");			
 			printf("\nOSS: %d Processes total were made.\n", procTotal);
 			printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
@@ -157,34 +149,7 @@ int main(int argc, char * argv[]){
 			exit(0);
 		}
 
-		sem_wait(semaphore);
-		for(int i = 0; i < max; i++){
-			printf("%d ", resoPtr[i]);
-		}
-		printf("\n");
-		sem_post(semaphore);
-
-
-
-
 	}
-		/* RUN DEADLOCK PREVENTION EVERY WHOLE SECOND */;
-//		sem_wait(semaphore);
-//		if(*clockPtr - previousTime >= (unsigned long)1e9/3){	
-//		if(requestExceeds(rescPtr, requPtr)){
-//			if(*pidPtr > 0){
-//	//		printf("PARENT KILLING %d:%d\n", procC, *pidPtr);
-//				kill(*pidPtr,SIGKILL);
-//				printf("Parent interjects\n");
-//			}
-//		}
-
-	sem_wait(semaphore);
-	for(int i = 0; i < max; i++){
-		printf("%d ", resoPtr[i]);
-	}
-	printf("\n");
-	sem_post(semaphore);
 	
 	printf("\nOSS: %d Processes total were made.\n", procTotal);
 	printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
