@@ -37,6 +37,7 @@ int main(int argc, char * argv[]){
 	bool requestedReso = false;
 	bool releasedReso = false;
 	unsigned long previousTime = 0;
+	int mypid = getpid();
 	time_t start, stop;
 	start = time(NULL);
 	int pname = atoi(argv[1]);
@@ -51,19 +52,33 @@ int main(int argc, char * argv[]){
 	int fd_shm1 = shm_open("RESC", O_RDWR, 0666);
 	ftruncate( fd_shm1, resoSize);
 	int * resoPtr = (int*)mmap(0, resoSize, PROT_WRITE, MAP_SHARED, fd_shm1, 0);
+	/* USER PID LIST FROM SHARED MEMORY */
+	int fd_shm2 = shm_open("PIDS", O_RDWR, 0666);
+	ftruncate( fd_shm2, sizeof(int)*max);
+	int * pidPtr = (int*)mmap(0, sizeof(int)*max, PROT_WRITE, MAP_SHARED, fd_shm2, 0);
 	/* LOAD SEMAPHORE */	
 	if(getnamed("/SEMA", &semaphore, 1) == -1){
 		perror("Failed to create named semaphore");
 		return 1;
 	}
 	sem_wait(semaphore);
-	srand(getpid());
-	int bound = getRandomNumber(1,100);
-	printf("\t-- Child %2d:%5d Created -------------------------\n", pname, getpid());
+	for(int i =0; i < 1e8/5; i++);
+	printf("-------- Child %2d:%5d Created ---------------------\n", pname, getpid());
 	fflush(stdout);
+	pidPtr[pname-1] = mypid;
 	sem_post(semaphore);
+	srand(mypid);
+	int bound = getRandomNumber(5,160);
 	/* INFINITE LOOP */
 	while(1){
+		/* IF SIGNAL RECEIVED FROM PARENT TO TERMINATE */
+		if(pidPtr[pname-1] == 0){
+			sem_wait(semaphore);
+			printf("\n>>> OSS Instructed %d:%d to terminate due to deadlock prevention.\n\n", pname, getpid());
+			writeOut("output.txt", pname, *clockPtr);
+			sem_post(semaphore);
+			break;
+		}
 		int diceRoll = getRandomNumber(0,100);
 		/* CHANCE PROCESS REQUESTS|RELEASES A RESOURCE */
 		if(diceRoll > 30 && *clockPtr > previousTime + (unsigned long)1e9/2){
@@ -75,7 +90,7 @@ int main(int argc, char * argv[]){
 				int randReso = getRandomNumber(1, maxReso);
 				sem_wait(semaphore);
 				writeString("output.txt", pname, *clockPtr, "child requesting resource");
-				printf("\tChild :%2d:%5d requesting resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
+				printf("\t Child %2d:%5d requesting resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
 				fflush(stdout);
 				resoPtr[pname-1] = randReso;
 				sem_post(semaphore);
@@ -87,7 +102,7 @@ int main(int argc, char * argv[]){
 				sem_wait(semaphore);
 				writeString("output.txt", pname, *clockPtr, "child releasing resource");
 				resoPtr[pname-1] = 0;
-				printf("\tChild :%2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
+				printf("\t Child %2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
 				fflush(stdout);
 				sem_post(semaphore);
 			}
@@ -99,7 +114,7 @@ int main(int argc, char * argv[]){
 		diceRoll = getRandomNumber(0,100);
 		sem_wait(semaphore);
 		if(*clockPtr >= (unsigned long)bound*(unsigned long)1e9 && diceRoll <= 10){	
-			if(requestedReso == true) printf("\tChild :%2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);	
+			if(requestedReso == true) printf("\t Child %2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);	
 			printf("\t\t\t\t  -- Child %2d:%5d completes ----------------------\n", pname, getpid());
 			fflush(stdout);
 			writeOut("output.txt", pname, *clockPtr);
@@ -110,7 +125,7 @@ int main(int argc, char * argv[]){
 		sem_post(semaphore);
 		/* HANDLING HUNG LOOP - SAFEGUARD TIMEOUT KILLS PROCESS IF STUCK */
 		stop = time(NULL);
-		if(stop - start > 30){
+		if(stop - start > 15){
 			printf("\t\tTimeout occured, killing %d:%d\n", pname, getpid());
 			r_wait(NULL);
 			sem_close(semaphore);
@@ -122,6 +137,7 @@ int main(int argc, char * argv[]){
 			exit(0);
 		}
 	}
+	sem_post(semaphore);
 	if(r_wait(NULL) == -1){
 		return 1;
 	}

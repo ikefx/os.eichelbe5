@@ -29,7 +29,9 @@
 #define FLAGS (O_CREAT | O_EXCL)
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
+int findDupUtility(int * arr, int n);
 void clearOldOutput();
+void writeString(char * name, unsigned long time, char * string);
 void writeOut(char * name,  unsigned long time, char * string);
 bool requestExceeds(int * resource, int * request);
 void printTable(int * resource, int * request);
@@ -42,7 +44,7 @@ int res[] = { 10, 2, 5, 5, 5, 2, 2, 3, 3, 1,
 	4, 4, 4, 6, 6, 6, 7, 8, 8, 9 };
 
 /* PROCESS COMPLETE BEFORE TERMINATE */
-const int max = 20;
+const int max = 50;
 
 int main(int argc, char * argv[]){
 	signal(SIGINT, sigintHandler);
@@ -55,6 +57,7 @@ int main(int argc, char * argv[]){
 	int procC = 0;
 	int childPid;
 	int procTotal = 0;
+	int totalDeadlockKills = 0;
 	pid_t pid;
 	/* SEMAPHORE */
 	sem_t * semaphore;
@@ -85,16 +88,17 @@ int main(int argc, char * argv[]){
 	}
 	/* KILL PID LIST IN SHARED MEMORY */
 	int fd_shm3 = shm_open("PIDS", O_CREAT | O_RDWR, 0666);
-	ftruncate( fd_shm3, sizeof(getpid()));
-	int * pidPtr = (int*)mmap(0, sizeof(getpid()), PROT_WRITE, MAP_SHARED, fd_shm3, 0);
+	ftruncate( fd_shm3, sizeof(int)*max );
+	int * pidPtr = (int*)mmap(0, sizeof(int)*max, PROT_WRITE, MAP_SHARED, fd_shm3, 0);
 	/* WHILE TOTAL PROCESSES < 30 OR CHILDREN INCOMPELETE 	*
  	*  INCREASE CLOCK AND POSSIBLY CREATE ANOTHER CHILD 	*/ 	
 	while(1){
 		if(procTotal < max && *clockPtr > 1e9){	
-			if(getRandomNumber(0,100) <= 25){
+			if(getRandomNumber(0,100) <= 20){
 				procC++;
 				procTotal++;		
-				if(procC > 18){
+				while(procC >= 18){
+					*clockPtr += 5e8;
 					wait(NULL);
 					procC--;
 				}
@@ -110,14 +114,25 @@ int main(int argc, char * argv[]){
 				}
 			}
 		}
+		sem_wait(semaphore);
 		* clockPtr += 5e8;
 		/* WILL INTERCEDE IN CHILD WHILE LOOP : EVERY SECOND */
 		if(procTotal > 0 && (*clockPtr % (unsigned long)1e9) == 0){
-			writeOut("output.txt", *clockPtr, "");
+			int dupI = findDupUtility(resoPtr, max);
+			//writeOut("output.txt", *clockPtr, "");
+			if(dupI != -1){
+				/* FOUND A DUPLICATE */
+				resoPtr[dupI] = 0;
+				pidPtr[dupI]  = 0;
+				totalDeadlockKills++;
+				procC--;
+				sem_post(semaphore);
+			}
+			sem_post(semaphore);
 		}
-
+		sem_post(semaphore);
 		/* BREAK OUT OF WHILE LOOP */
-		if(*clockPtr > 180e9 && procTotal >= max) break;
+		if(*clockPtr > 210e9 && procTotal >= max) break;
 
 	}
 	time_t start = time(NULL);
@@ -126,7 +141,15 @@ int main(int argc, char * argv[]){
 	while((pid = wait(NULL)) > 0){
 		sem_wait(semaphore);
 		if(*clockPtr % (unsigned long)1e9 == 0){
-			writeOut("output.txt", *clockPtr, " in wait loop ");
+			int dupI = findDupUtility(resoPtr, max);
+			writeString("output.txt", *clockPtr, "Deadlock Prevention is signaling a process to terminate.");
+			if(dupI != -1){
+				/* FOUND A DUPLICATE */
+				resoPtr[dupI] = 0;
+				pidPtr[dupI]  = 0;
+				totalDeadlockKills++;
+				procC--;
+			}
 		}
 		* clockPtr += 5e8;
 		sem_post(semaphore);
@@ -150,10 +173,18 @@ int main(int argc, char * argv[]){
 		}
 
 	}
-	
-	printf("\nOSS: %d Processes total were made.\n", procTotal);
+	sem_wait(semaphore);	
+	printf("\nOSS: %d Processes total were made. %d were killed due to deadlock prevention\n", procTotal, totalDeadlockKills);
+	printf("\tThere were %d different types of resources made available to children this run\n", resourceMax);
 	printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
-	
+	FILE *fp;
+	fp = fopen("output.txt", "a");
+	char wroteline[355];
+	sprintf(wroteline, "\nOSS Terminated at %f\nOSS: %d Processes total were made. %d were killed by deadlock prevention\nThere were %d differnt resource types made available to children this run\n", *clockPtr / 1e9, procTotal, totalDeadlockKills, resourceMax);
+	fprintf(fp, wroteline);
+	fclose(fp);
+
+	sem_post(semaphore);
 	sem_unlink("/SEMA");
 	sem_destroy(semaphore);
 	shmdt(requPtr);
@@ -164,6 +195,34 @@ int main(int argc, char * argv[]){
 	sem_unlink("REQU");
 	sem_unlink("PIDS");
 	return 0;
+}
+
+int findDupUtility(int * arr, int n){
+	/* FIND DUPLICATE IN ARRAY, RETURN INDEX OF SECOND INSTANCE */
+	int idx, i, j;
+	idx = -1;
+	for( i = 0; i < n; i++){
+		for( j = i+1; j < n; j++){
+			if(arr[i] == arr[j] && arr[i] != 0){
+				idx = j;
+				break;
+			}
+		}
+		if(idx != -1) break;
+	}
+	if(idx != -1){
+		return idx;
+	} else return -1;
+}
+
+void writeString(char * name, unsigned long time, char * string){
+	FILE *fp;
+	fp = fopen(name, "a");
+	char wroteline[355];
+	sprintf(wroteline, "%s\t%.0lu:%lu %s\n", string, (time / (unsigned long) 1e9), time, string);
+	fprintf(fp, wroteline);
+	fclose(fp);
+	return;
 }
 
 void writeOut(char * name, unsigned long time, char * string){
