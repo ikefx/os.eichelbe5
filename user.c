@@ -32,6 +32,8 @@ int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
 pid_t r_wait(int * stat_loc);
 
+char * sema = "SEMA5";
+
 int main(int argc, char * argv[]){
 	/* INIT VARIABLES */
 	bool requestedReso = false;
@@ -57,7 +59,7 @@ int main(int argc, char * argv[]){
 	ftruncate( fd_shm2, sizeof(int)*max);
 	int * pidPtr = (int*)mmap(0, sizeof(int)*max, PROT_WRITE, MAP_SHARED, fd_shm2, 0);
 	/* LOAD SEMAPHORE */	
-	if(getnamed("/SEMA", &semaphore, 1) == -1){
+	if(getnamed(sema, &semaphore, 1) == -1){
 		perror("Failed to create named semaphore");
 		return 1;
 	}
@@ -133,7 +135,8 @@ int main(int argc, char * argv[]){
 			shm_unlink("RESC");
 			shm_unlink("REQU");
 			shm_unlink("PIDS");
-			shm_unlink("/SEMA");
+			sem_close(semaphore);
+			//sem_unlink(sema);
 			exit(0);
 		}
 	}
@@ -148,7 +151,7 @@ int main(int argc, char * argv[]){
 	shm_unlink("RESC");
 	shm_unlink("REQU");
 	shm_unlink("PIDS");
-	shm_unlink("/SEMA");
+//	sem_unlink(sema);
 	exit(0);
 }
 

@@ -45,6 +45,7 @@ int res[] = { 10, 2, 5, 5, 5, 2, 2, 3, 3, 1,
 
 /* PROCESS COMPLETE BEFORE TERMINATE */
 const int max = 50;
+char* sema = "SEMA5";
 
 int main(int argc, char * argv[]){
 	signal(SIGINT, sigintHandler);
@@ -61,7 +62,7 @@ int main(int argc, char * argv[]){
 	pid_t pid;
 	/* SEMAPHORE */
 	sem_t * semaphore;
-	if(getnamed("/SEMA", &semaphore, 1) == -1){
+	if(getnamed(sema, &semaphore, 1) == -1){
 		perror("Failed to create named semaphore");
 		return 1;
 	}
@@ -160,15 +161,16 @@ int main(int argc, char * argv[]){
 			printf("OSS: Timeout occured, shutting down.\n");			
 			printf("\nOSS: %d Processes total were made.\n", procTotal);
 			printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
-			sem_unlink("/SEMA");
+			sem_close(semaphore);
+			sem_unlink(sema);
 			sem_destroy(semaphore);
 			shmdt(requPtr);
 			shmdt(resoPtr);
 			shmdt(pidPtr);
-			sem_unlink("CLOCK");
-			sem_unlink("RESC");
-			sem_unlink("REQU");
-			sem_unlink("PIDS");
+			shm_unlink("CLOCK");
+			shm_unlink("RESC");
+			shm_unlink("REQU");
+			shm_unlink("PIDS");
 			exit(0);
 		}
 
@@ -185,15 +187,16 @@ int main(int argc, char * argv[]){
 	fclose(fp);
 
 	sem_post(semaphore);
-	sem_unlink("/SEMA");
+	sem_close(semaphore);
+	sem_unlink(sema);
 	sem_destroy(semaphore);
 	shmdt(requPtr);
 	shmdt(resoPtr);
 	shmdt(pidPtr);
-	sem_unlink("CLOCK");
-	sem_unlink("RESC");
-	sem_unlink("REQU");
-	sem_unlink("PIDS");
+	shm_unlink("CLOCK");
+	shm_unlink("RESC");
+	shm_unlink("REQU");
+	shm_unlink("PIDS");
 	return 0;
 }
 
@@ -296,7 +299,7 @@ void sigintHandler(int sig_num){
 	printf("\nTerminating all...\n");
 	shm_unlink("CLOCK");
 	shm_unlink("RESC");
-	shm_unlink("/SEMA");
+	sem_unlink(sema);
 	kill(0,SIGTERM);
 	exit(0);
 }
