@@ -29,6 +29,8 @@
 #define FLAGS (O_CREAT | O_EXCL)
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
+#define FLAGSMEM ( PROT_EXEC | PROT_READ | PROT_WRITE )
+
 int findDupUtility(int * arr, int n);
 void clearOldOutput();
 void writeString(char * name, unsigned long time, char * string);
@@ -70,27 +72,27 @@ int main(int argc, char * argv[]){
 	size_t clockSize = sizeof(unsigned long) * 2;
 	int fd_shm0 = shm_open("CLOCK", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm0, clockSize );
-	unsigned long * clockPtr = (unsigned long*)mmap(0, clockSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm0, 0);
+	unsigned long * clockPtr = (unsigned long*)mmap(0, clockSize, FLAGSMEM, MAP_SHARED, fd_shm0, 0);
 	* clockPtr = 0;
 	/* RESOURCE REQUEST IN SHARED MEMORY */
 	size_t resoSize = sizeof(int) * max;
 	int fd_shm1 = shm_open("RESC", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm1, resoSize);
-	int * resoPtr = (int*)mmap(0, resoSize, PROT_WRITE, MAP_SHARED, fd_shm1, 0);
+	int * resoPtr = (int*)mmap(0, resoSize, FLAGSMEM, MAP_SHARED, fd_shm1, 0);
 	for(int i = 0; i < 20; i++){
 		resoPtr[i] = 0;
 	}
 	/* REQUEST IN SHARED MEMORY */	
 	int fd_shm2 = shm_open("REQU", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm2, resoSize);
-	int * requPtr = (int*)mmap(0, resoSize, PROT_WRITE, MAP_SHARED, fd_shm2, 0);
+	int * requPtr = (int*)mmap(0, resoSize, FLAGSMEM, MAP_SHARED, fd_shm2, 0);
 	for(int i = 0; i < 20; i++){
 		requPtr[i] = 0;
 	}
 	/* KILL PID LIST IN SHARED MEMORY */
 	int fd_shm3 = shm_open("PIDS", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm3, sizeof(int)*max );
-	int * pidPtr = (int*)mmap(0, sizeof(int)*max, PROT_WRITE, MAP_SHARED, fd_shm3, 0);
+	int * pidPtr = (int*)mmap(0, sizeof(int)*max, FLAGSMEM, MAP_SHARED, fd_shm3, 0);
 	/* WHILE TOTAL PROCESSES < 30 OR CHILDREN INCOMPELETE 	*
  	*  INCREASE CLOCK AND POSSIBLY CREATE ANOTHER CHILD 	*/ 	
 	while(1){
