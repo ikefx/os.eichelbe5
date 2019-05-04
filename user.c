@@ -33,7 +33,6 @@ int getnamed(char *name, sem_t **sem, int val);
 pid_t r_wait(int * stat_loc);
 
 char * sema = "SEMA5";
-
 int main(int argc, char * argv[]){
 	/* INIT VARIABLES */
 	bool requestedReso = false;
@@ -45,19 +44,21 @@ int main(int argc, char * argv[]){
 	int pname = atoi(argv[1]);
 	int max = atoi(argv[2]);
 	int maxReso = atoi(argv[3]);
+	size_t clockSize = sizeof(unsigned long) + 1;
+	size_t resoSize  = sizeof(int) * max;
 	sem_t * semaphore;
 	/* READ SHARED MEMORY */
 	int fd_shm0 = shm_open("CLOCK", O_RDWR, 0666);
-	unsigned long * clockPtr = (unsigned long*)mmap(0, sizeof(unsigned long)*2, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm0, 0);
+	ftruncate( fd_shm0, clockSize);
+	unsigned long * clockPtr = (unsigned long*)mmap(0, clockSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm0, 0);
 	/* RESOURCE REQUEST IN SHARED MEMORY */
-	size_t resoSize = sizeof(int) * max;
 	int fd_shm1 = shm_open("RESC", O_RDWR, 0666);
 	ftruncate( fd_shm1, resoSize);
 	int * resoPtr = (int*)mmap(0, resoSize, PROT_WRITE, MAP_SHARED, fd_shm1, 0);
 	/* USER PID LIST FROM SHARED MEMORY */
 	int fd_shm2 = shm_open("PIDS", O_RDWR, 0666);
-	ftruncate( fd_shm2, sizeof(int)*max);
-	int * pidPtr = (int*)mmap(0, sizeof(int)*max, PROT_WRITE, MAP_SHARED, fd_shm2, 0);
+	ftruncate( fd_shm2, resoSize);
+	int * pidPtr  = (int*)mmap(0, resoSize, PROT_WRITE, MAP_SHARED, fd_shm2, 0);
 	/* LOAD SEMAPHORE */	
 	if(getnamed(sema, &semaphore, 1) == -1){
 		perror("Failed to create named semaphore");
@@ -136,7 +137,6 @@ int main(int argc, char * argv[]){
 			shm_unlink("REQU");
 			shm_unlink("PIDS");
 			sem_close(semaphore);
-			//sem_unlink(sema);
 			exit(0);
 		}
 	}
@@ -151,7 +151,6 @@ int main(int argc, char * argv[]){
 	shm_unlink("RESC");
 	shm_unlink("REQU");
 	shm_unlink("PIDS");
-//	sem_unlink(sema);
 	exit(0);
 }
 

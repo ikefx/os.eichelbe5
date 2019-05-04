@@ -28,8 +28,8 @@
 
 #define FLAGS (O_CREAT | O_EXCL)
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
-
 #define FLAGSMEM ( PROT_EXEC | PROT_READ | PROT_WRITE )
+#define max 50	// number of processes before succesful completion
 
 int findDupUtility(int * arr, int n);
 void clearOldOutput();
@@ -41,19 +41,17 @@ int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
 void sigintHandler(int sig_num);
 
-/* RESOURCE TABLE */
-int res[] = { 10, 2, 5, 5, 5, 2, 2, 3, 3, 1,
-	4, 4, 4, 6, 6, 6, 7, 8, 8, 9 };
-
-/* PROCESS COMPLETE BEFORE TERMINATE */
-const int max = 50;
 char* sema = "SEMA5";
+size_t clockSize = sizeof(unsigned long) + 1;
+size_t resoSize  = sizeof(int) * max;
+unsigned long * clockPtr = NULL;
+int * resoPtr = NULL;
+int * pidPtr  = NULL;
 
 int main(int argc, char * argv[]){
 	signal(SIGINT, sigintHandler);
 	printf("\t\t--> OSS START <--\n\t\tParent PID: %d\n\n",getpid());
 	clearOldOutput();
-	fflush(stdout);
 	srand(time(NULL));
 	/* INIT VARIABLES */
 	int resourceMax = 20 + getRandomNumber(-4,4);
@@ -69,30 +67,21 @@ int main(int argc, char * argv[]){
 		return 1;
 	}
 	/* TIMER IN SHARED MEMORY */
-	size_t clockSize = sizeof(unsigned long) * 2;
 	int fd_shm0 = shm_open("CLOCK", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm0, clockSize );
-	unsigned long * clockPtr = (unsigned long*)mmap(0, clockSize, FLAGSMEM, MAP_SHARED, fd_shm0, 0);
+	clockPtr = (unsigned long*)mmap(0, clockSize, FLAGSMEM, MAP_SHARED, fd_shm0, 0);
 	* clockPtr = 0;
 	/* RESOURCE REQUEST IN SHARED MEMORY */
-	size_t resoSize = sizeof(int) * max;
 	int fd_shm1 = shm_open("RESC", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm1, resoSize);
-	int * resoPtr = (int*)mmap(0, resoSize, FLAGSMEM, MAP_SHARED, fd_shm1, 0);
+	resoPtr = (int*)mmap(0, resoSize, FLAGSMEM, MAP_SHARED, fd_shm1, 0);
 	for(int i = 0; i < 20; i++){
 		resoPtr[i] = 0;
 	}
-	/* REQUEST IN SHARED MEMORY */	
-	int fd_shm2 = shm_open("REQU", O_CREAT | O_RDWR, 0666);
-	ftruncate( fd_shm2, resoSize);
-	int * requPtr = (int*)mmap(0, resoSize, FLAGSMEM, MAP_SHARED, fd_shm2, 0);
-	for(int i = 0; i < 20; i++){
-		requPtr[i] = 0;
-	}
 	/* KILL PID LIST IN SHARED MEMORY */
 	int fd_shm3 = shm_open("PIDS", O_CREAT | O_RDWR, 0666);
-	ftruncate( fd_shm3, sizeof(int)*max );
-	int * pidPtr = (int*)mmap(0, sizeof(int)*max, FLAGSMEM, MAP_SHARED, fd_shm3, 0);
+	ftruncate( fd_shm3, resoSize );
+	pidPtr = (int*)mmap(0, resoSize, FLAGSMEM, MAP_SHARED, fd_shm3, 0);
 	/* WHILE TOTAL PROCESSES < 30 OR CHILDREN INCOMPELETE 	*
  	*  INCREASE CLOCK AND POSSIBLY CREATE ANOTHER CHILD 	*/ 	
 	while(1){
@@ -142,6 +131,7 @@ int main(int argc, char * argv[]){
 	time_t stop;
 	/* WAIT FOR INCOMPLETE PROCESS */
 	while((pid = wait(NULL)) > 0){
+		*clockPtr += 5e8;
 		sem_wait(semaphore);
 		if(*clockPtr % (unsigned long)1e9 == 0){
 			int dupI = findDupUtility(resoPtr, max);
@@ -166,12 +156,8 @@ int main(int argc, char * argv[]){
 			sem_close(semaphore);
 			sem_unlink(sema);
 			sem_destroy(semaphore);
-			shmdt(requPtr);
-			shmdt(resoPtr);
-			shmdt(pidPtr);
 			shm_unlink("CLOCK");
 			shm_unlink("RESC");
-			shm_unlink("REQU");
 			shm_unlink("PIDS");
 			exit(0);
 		}
@@ -192,12 +178,8 @@ int main(int argc, char * argv[]){
 	sem_close(semaphore);
 	sem_unlink(sema);
 	sem_destroy(semaphore);
-	shmdt(requPtr);
-	shmdt(resoPtr);
-	shmdt(pidPtr);
 	shm_unlink("CLOCK");
 	shm_unlink("RESC");
-	shm_unlink("REQU");
 	shm_unlink("PIDS");
 	return 0;
 }
@@ -300,6 +282,7 @@ void sigintHandler(int sig_num){
 	signal(SIGINT, sigintHandler);
 	printf("\nTerminating all...\n");
 	shm_unlink("CLOCK");
+	shm_unlink("PIDS");
 	shm_unlink("RESC");
 	sem_unlink(sema);
 	kill(0,SIGTERM);
