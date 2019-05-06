@@ -21,10 +21,11 @@
 #include <sys/wait.h>
 #include <stdbool.h>
 
-//#define FLAGS (O_RDWR | O_EXCL)
 #define FLAGS O_RDWR
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
+void writeOutDeadlock(char * name, int child, unsigned long time);
+void writeStringSuccess(char * name, int child, unsigned long time, char * string);
 void writeString(char * name, int child, unsigned long time, char * string);
 void writeOut(char * name, int child, unsigned long time);
 void printTable(int * resource, int * request);
@@ -33,6 +34,7 @@ int getnamed(char *name, sem_t **sem, int val);
 pid_t r_wait(int * stat_loc);
 
 char * sema = "SEMA5";
+
 int main(int argc, char * argv[]){
 	/* INIT VARIABLES */
 	bool requestedReso = false;
@@ -72,18 +74,21 @@ int main(int argc, char * argv[]){
 	sem_post(semaphore);
 	srand(mypid);
 	int bound = getRandomNumber(5,160);
+	usleep(100000);
 	/* INFINITE LOOP */
 	while(1){
 		/* IF SIGNAL RECEIVED FROM PARENT TO TERMINATE */
 		if(pidPtr[pname-1] == 0){
 			sem_wait(semaphore);
 			printf("\n>>> OSS Instructed %d:%d to terminate due to deadlock prevention.\n\n", pname, getpid());
+			writeOutDeadlock("output.txt", pname, *clockPtr);
 			writeOut("output.txt", pname, *clockPtr);
 			sem_post(semaphore);
 			break;
 		}
-		int diceRoll = getRandomNumber(0,100);
+
 		/* CHANCE PROCESS REQUESTS|RELEASES A RESOURCE */
+		int diceRoll = getRandomNumber(0,100);
 		if(diceRoll > 30 && *clockPtr > previousTime + (unsigned long)1e9/2){
 			diceRoll = getRandomNumber(0,100);
 			/* PROCESS REQUESTS A RESOURCE */
@@ -97,6 +102,8 @@ int main(int argc, char * argv[]){
 				fflush(stdout);
 				resoPtr[pname-1] = randReso;
 				sem_post(semaphore);
+				/* SLEEP THE PROCESS TO SIMULATE REQUEST WAIT TIME */
+				usleep(100000);
 			}
 			/* PROCESS RELEASES ITS RESOURCE (IF ACCEPTED BY PARENT)*/
 			else if(requestedReso && !releasedReso && start < start+10e9 && diceRoll <= 20) {
@@ -106,26 +113,28 @@ int main(int argc, char * argv[]){
 				writeString("output.txt", pname, *clockPtr, "child releasing resource");
 				resoPtr[pname-1] = 0;
 				printf("\t Child %2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
-				fflush(stdout);
 				sem_post(semaphore);
 			}
 			sem_wait(semaphore);
 			previousTime = *clockPtr;
 			sem_post(semaphore);
 		}
-		/* CHANCE PROCESS TERMINATES ITSELF */
-		diceRoll = getRandomNumber(0,100);
+
+		/* CHANCE PROCESS TERMINATES ITSELF (SUCCESS) */
 		sem_wait(semaphore);
+		diceRoll = getRandomNumber(0,100);
 		if(*clockPtr >= (unsigned long)bound*(unsigned long)1e9 && diceRoll <= 10){	
 			if(requestedReso == true) printf("\t Child %2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);	
 			printf("\t\t\t\t  -- Child %2d:%5d completes ----------------------\n", pname, getpid());
 			fflush(stdout);
+			writeStringSuccess("output.txt", pname, *clockPtr, "this is test");
 			writeOut("output.txt", pname, *clockPtr);
 			resoPtr[pname-1] = 0;
 			sem_post(semaphore);
 			break;
 		}
 		sem_post(semaphore);
+
 		/* HANDLING HUNG LOOP - SAFEGUARD TIMEOUT KILLS PROCESS IF STUCK */
 		stop = time(NULL);
 		if(stop - start > 15){
@@ -163,11 +172,33 @@ void writeString(char * name, int child, unsigned long time, char * string){
 	fclose(fp);
 	return;
 }
+
+void writeStringSuccess(char * name, int child, unsigned long time, char * string){
+	FILE *fp;
+	fp = fopen(name, "a");
+	char wroteline[355];
+	sprintf(wroteline, "\t  ---> USER Child %d:%d completed successfully.", child, getpid());
+	fprintf(fp, wroteline);
+	fclose(fp);
+	return;
+}
+
+
+void writeOutDeadlock(char * name, int child, unsigned long time){
+	FILE *fp;
+	fp = fopen(name, "a");
+	char wroteline[355];
+	sprintf(wroteline, "  ---> OSS instructed Child %d:%d to terminate at %.0lu:%lu ", child, getpid(), time/(unsigned long)1e9, time);
+	fprintf(fp, wroteline);
+	fclose(fp);
+	return;
+}
+
 void writeOut(char * name, int child, unsigned long time){
 	FILE *fp;
 	fp = fopen(name, "a");
 	char wroteline[355];
-	sprintf(wroteline, "\t\t\tChild %d:%d terminated at %.0lu:%lu\n", child, getpid(), time/(unsigned long)1e9, time);
+	sprintf(wroteline, "\tChild %d:%d terminated at %.0lu:%lu\n", child, getpid(), time/(unsigned long)1e9, time);
 	fprintf(fp, wroteline);
 	fclose(fp);
 	return;

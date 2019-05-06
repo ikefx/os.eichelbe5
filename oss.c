@@ -35,7 +35,6 @@ int findDupUtility(int * arr, int n);
 void clearOldOutput();
 void writeString(char * name, unsigned long time, char * string);
 void writeOut(char * name,  unsigned long time, char * string);
-bool requestExceeds(int * resource, int * request);
 void printTable(int * resource, int * request);
 int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
@@ -49,7 +48,6 @@ int * resoPtr = NULL;
 int * pidPtr  = NULL;
 
 int main(int argc, char * argv[]){
-	signal(SIGINT, sigintHandler);
 	printf("\t\t--> OSS START <--\n\t\tParent PID: %d\n\n",getpid());
 	clearOldOutput();
 	srand(time(NULL));
@@ -85,11 +83,13 @@ int main(int argc, char * argv[]){
 	/* WHILE TOTAL PROCESSES < 30 OR CHILDREN INCOMPELETE 	*
  	*  INCREASE CLOCK AND POSSIBLY CREATE ANOTHER CHILD 	*/ 	
 	while(1){
-		if(procTotal < max && *clockPtr > 1e9){	
+		/* CREATE NEW PROCESS RANDOM CHANCE */
+		if(procTotal < max && *clockPtr >= 1e9){	
 			if(getRandomNumber(0,100) <= 20){
 				procC++;
 				procTotal++;		
 				while(procC >= 18){
+					signal(SIGINT, sigintHandler);
 					*clockPtr += 5e8;
 					wait(NULL);
 					procC--;
@@ -106,8 +106,10 @@ int main(int argc, char * argv[]){
 				}
 			}
 		}
+
 		sem_wait(semaphore);
 		* clockPtr += 5e8;
+
 		/* WILL INTERCEDE IN CHILD WHILE LOOP : EVERY SECOND */
 		if(procTotal > 0 && (*clockPtr % (unsigned long)1e9) == 0){
 			int dupI = findDupUtility(resoPtr, max);
@@ -131,11 +133,12 @@ int main(int argc, char * argv[]){
 	time_t stop;
 	/* WAIT FOR INCOMPLETE PROCESS */
 	while((pid = wait(NULL)) > 0){
+		signal(SIGINT, sigintHandler);
 		*clockPtr += 5e8;
 		sem_wait(semaphore);
-		if(*clockPtr % (unsigned long)1e9 == 0){
+		if(procTotal > 0 && *clockPtr % (unsigned long)1e9 == 0){
 			int dupI = findDupUtility(resoPtr, max);
-			writeString("output.txt", *clockPtr, "Deadlock Prevention is signaling a process to terminate.");
+			//writeString("output.txt", *clockPtr, "whilepid loop Deadlock Prevention is signaling a process to terminate.\n");
 			if(dupI != -1){
 				/* FOUND A DUPLICATE */
 				resoPtr[dupI] = 0;
@@ -144,9 +147,9 @@ int main(int argc, char * argv[]){
 				procC--;
 			}
 		}
-		* clockPtr += 5e8;
 		sem_post(semaphore);
 
+	wait(NULL);
 		/* COMMIT SUICIDE IF HUNG : TIMEOUT HANDLING */
 		stop = time(NULL);
 		if(stop - start > 90){
@@ -229,16 +232,6 @@ void clearOldOutput(){
 		printf("--> Previous %s deleted.\n\n", "output.txt");
 	}
 	return;
-}
-
-bool requestExceeds(int * resource, int * request){
-	/* BOOL RETURNS T/F IF REQUEST EXCEEDS RESOURCE */
-	for(int i = 0; i < 20; i++){
-		if(request[i] > resource[i]){
-			return true;
-		}
-	}
-	return false;
 }
 
 void printTable(int * resource, int * request){
