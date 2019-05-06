@@ -30,6 +30,8 @@ struct rTable {
 	int request[max];
 	int approved[max];
 	int resource[max];
+	int requestC;
+	int releaseC;
 };
 
 const size_t SHMSZ = sizeof(struct rTable);
@@ -119,6 +121,7 @@ int main(int argc, char * argv[]){
 				writeRequest("output.txt", pname, *clockPtr, "REQUESTING");
 				printf("\t Child %2d:%5d requesting resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
 				resoPtr[pname-1] = randReso;
+				rptr->requestC++;
 				sem_post(semaphore);
 				/* SLEEP THE PROCESS TO SIMULATE REQUEST WAIT TIME */
 				rptr->request[pname-1] = randReso;
@@ -131,6 +134,7 @@ int main(int argc, char * argv[]){
 				releasedReso  = true;
 				sem_wait(semaphore);
 				resoPtr[pname-1] = 0;
+				rptr->releaseC++;
 				printf("\t Child %2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
 				writeRequest("output.txt", pname, *clockPtr, "RELEASING");
 				sem_post(semaphore);

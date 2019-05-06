@@ -36,12 +36,14 @@ struct rTable {
 	int request[max];
 	int approved[max];
 	int resource[max];
+	int requestC;
+	int releaseC;
 };
 
 int findDupUtility(int * arr, int n);
 void clearOldOutput();
 void writeTable(char * name, int * resource, int * request, int * approved, int rSize);
-void writeString(char * name, unsigned long time, char * string);
+void writeString(char * name, unsigned long time, char * string, int resourceType, int childName);
 void writeOut(char * name,  unsigned long time, char * string);
 int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
@@ -91,7 +93,8 @@ int main(int argc, char * argv[]){
 		rptr->approved[i] = -1;}
 	for(int i = 0; i < resourceMax; i++){
 		rptr->resource[i] = 3;}
-
+	rptr->requestC = 0;
+	rptr->releaseC = 0;
 	/* TIMER IN SHARED MEMORY */
 	int fd_shm0 = shm_open("CLOCK", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm0, clockSize );
@@ -168,10 +171,13 @@ int main(int argc, char * argv[]){
 				if(rptr->resource[rReq] < 1 ){
 				/* DENY */
 					rptr->approved[pname-1] = 0;
+				//	writeString("output.txt", *clockPtr, "\tOSS: OSS denied the request for R: ", rReq, pname );
+				//	commenting out deny due to amount of lines it generates in output.txt
 				}else{
 				/* APPROVE */
 					rptr->approved[pname-1] = 1;
 					rptr->resource[rReq] -= 1;
+					writeString("output.txt", *clockPtr, "\tOSS: OSS approved the request for R: ", rReq, pname );
 				}
 			}
 		}
@@ -231,7 +237,8 @@ int main(int argc, char * argv[]){
 	FILE *fp;
 	fp = fopen("output.txt", "a");
 	char wroteline[355];
-	sprintf(wroteline, "\nOSS Terminated at %f\nOSS: %d Processes total were made. %d were killed by deadlock prevention\nThere were %d differnt resource types made available to children this run\n", *clockPtr / 1e9, procTotal, totalDeadlockKills, resourceMax);
+	sprintf(wroteline, "\nOSS Terminated at %f\nOSS: %d Processes total were made. %d were killed by deadlock prevention\nThere were %d differnt resource types, and %d requests and %d releases made.\n", 
+		*clockPtr / 1e9, procTotal, totalDeadlockKills, resourceMax, rptr->requestC, rptr->releaseC);
 	fprintf(fp, wroteline);
 	fclose(fp);
 
@@ -272,11 +279,11 @@ int findDupUtility(int * arr, int n){
 	} else return -1;
 }
 
-void writeString(char * name, unsigned long time, char * string){
+void writeString(char * name, unsigned long time, char * string, int resourceType, int childName){
 	FILE *fp;
 	fp = fopen(name, "a");
 	char wroteline[355];
-	sprintf(wroteline, "%s\t%.0lu:%lu %s\n", string, (time / (unsigned long) 1e9), time, string);
+	sprintf(wroteline, "%s%d by Child %d at %.0lu:%lu\n", string, resourceType, childName, (time / (unsigned long) 1e9), time);
 	fprintf(fp, wroteline);
 	fclose(fp);
 	return;
