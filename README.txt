@@ -78,5 +78,5 @@ CHILD TERMINATION CRITERA
 	there is a less than 10% chance a child will terminate successfully while running. If it has no resources held it will terminate.  If it has resources held, it will release them and close
 	This is considered a successful child
 > TIMEOUT TERMINATE
-	if a child waits for more than 5 realtime seconds, it is killed
+	if a child waits for more than 5 realtime seconds, it is forced to release any resources and is killed
 
