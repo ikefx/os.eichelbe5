@@ -44,14 +44,39 @@ SHARED MEMORY ITEMS
 	user.c monitors the pid array, and if OSS sets the child process's pid to 0, that serves as the signal that oss.c is instructing child to terminate due to risk
 	of deadlock.
 
+IPC MEM SEGMENT
+	
+	> Stores a struct containing the available resources, requests sent to OSS, and an (approve|deny) signal.  
+
+PRINT MEM SEMGENT FORMAT
+
+	> At various times the resource table is printed for viewing. The format of the table follows:
+
+	Resources Row:  this row shows all available resources in the system.  Each column is a different resource.  Each resource type starts with 3 available.  So number of columns
+	multiplied by 3 equals all resources available in the system.
+
+	Requests Row: this row shows the requests being made by children for a specific resource.  The value of each column is the resource they are requesting, each request is for
+	one resource of this resource type.  The column index of this row is the `process name` of the child process that is requesting the resource.  Defaults to -1 on init, will update
+	to resource name when sending requests.
+
+	Approved Row: this row is an array of signals that the OSS switchs on|off based on whether they approve or deny a childs request.  The value for each column is:
+	-1 = inital val (if -1 at simulation end, that means the child never made a requests therefore parent never approved|denied a request
+	0 = deny .. the parent denied the requests, the child reads the 0 and waits until it no longer is zero (while hung theres a chance the child will be terminated by deadlock algorithm
+	1 = approved .. the parent approved the request, allowing the child to take the resource
+
 OUTPUT
 
 	and output file exists to log results, results are also shown to stdout.  Results include the number of deadlock prevention events where oss.c killed a child, 
 	as well as the number of total children executed, and amount of resources that had been available in that simulation.
 
-TIMEOUT HANDLING
+CHILD TERMINATION CRITERA
 
-	The program has a risks of getting hung in its primary loop.  This is due to the BOUND value of children. Since the BOUND is random, it is possible that 18+ children processes
-	will select a bound that the clock will not reach, this can cause the program to hang.  If children become hung in this manner, they will terminate after 15 real time seconds.
-	Since no more than 18 proceses can be run at once, if hung the timeout will be required to proceed.  Please rerun the simulation if timeout occurs.
-	
+> DEADLOCK KILL
+	the OS signals the child to terminate if it is caught in deadlock prevention, this is done if parent discovers a child requesting a resource that is already being requested (hence waited upon
+	by another child)
+> SUCCESSFUL TERMINATION
+	there is a less than 10% chance a child will terminate successfully while running. If it has no resources held it will terminate.  If it has resources held, it will release them and close
+	This is considered a successful child
+> TIMEOUT TERMINATE
+	if a child waits for more than 5 realtime seconds, it is killed
+
