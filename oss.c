@@ -26,19 +26,27 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#define SHM_KEY 0x9893
 #define FLAGS (O_CREAT | O_EXCL)
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 #define FLAGSMEM ( PROT_EXEC | PROT_READ | PROT_WRITE )
 #define max 50	// number of processes before succesful completion
 
+struct rTable {
+	int request[max];
+	int approved[max];
+	int resource[max];
+};
+
 int findDupUtility(int * arr, int n);
 void clearOldOutput();
+void writeTable(char * name, int * resource, int * request, int * approved, int rSize);
 void writeString(char * name, unsigned long time, char * string);
 void writeOut(char * name,  unsigned long time, char * string);
-void printTable(int * resource, int * request);
 int getRandomNumber(int low, int high);
 int getnamed(char *name, sem_t **sem, int val);
 void sigintHandler(int sig_num);
+void printTable(int * resource, int * request, int * approved, int rSize);
 
 char* sema = "SEMA5";
 size_t clockSize = sizeof(unsigned long) + 1;
@@ -47,10 +55,15 @@ unsigned long * clockPtr = NULL;
 int * resoPtr = NULL;
 int * pidPtr  = NULL;
 
+const size_t SHMSZ = sizeof(struct rTable);
+struct rTable * rptr;
+int shm1;
+
 int main(int argc, char * argv[]){
 	printf("\t\t--> OSS START <--\n\t\tParent PID: %d\n\n",getpid());
 	clearOldOutput();
-	srand(time(NULL));
+	srand(getpid());
+
 	/* INIT VARIABLES */
 	int resourceMax = 20 + getRandomNumber(-4,4);
 	int procC = 0;
@@ -58,17 +71,33 @@ int main(int argc, char * argv[]){
 	int procTotal = 0;
 	int totalDeadlockKills = 0;
 	pid_t pid;
+
 	/* SEMAPHORE */
 	sem_t * semaphore;
 	if(getnamed(sema, &semaphore, 1) == -1){
 		perror("Failed to create named semaphore");
 		return 1;
 	}
+
+	/* SET MEMORY SEGMENT AND INIT VARIABLES*/
+	if((shm1 = shmget(SHM_KEY, SHMSZ, IPC_CREAT | 0666)) < 0){
+		perror("Shared memory create: shmget()");
+		exit(1);}
+	if((rptr = shmat(shm1, NULL, 0)) == (void*) -1){
+		perror("Shared memory attach: shmat()");
+		exit(1);}
+	for(int i = 0; i < max; i++){
+		rptr->request[i] = -1;
+		rptr->approved[i] = -1;}
+	for(int i = 0; i < resourceMax; i++){
+		rptr->resource[i] = 3;}
+
 	/* TIMER IN SHARED MEMORY */
 	int fd_shm0 = shm_open("CLOCK", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm0, clockSize );
 	clockPtr = (unsigned long*)mmap(0, clockSize, FLAGSMEM, MAP_SHARED, fd_shm0, 0);
 	* clockPtr = 0;
+
 	/* RESOURCE REQUEST IN SHARED MEMORY */
 	int fd_shm1 = shm_open("RESC", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm1, resoSize);
@@ -76,18 +105,25 @@ int main(int argc, char * argv[]){
 	for(int i = 0; i < 20; i++){
 		resoPtr[i] = 0;
 	}
+
 	/* KILL PID LIST IN SHARED MEMORY */
 	int fd_shm3 = shm_open("PIDS", O_CREAT | O_RDWR, 0666);
 	ftruncate( fd_shm3, resoSize );
 	pidPtr = (int*)mmap(0, resoSize, FLAGSMEM, MAP_SHARED, fd_shm3, 0);
+
 	/* WHILE TOTAL PROCESSES < 30 OR CHILDREN INCOMPELETE 	*
  	*  INCREASE CLOCK AND POSSIBLY CREATE ANOTHER CHILD 	*/ 	
 	while(1){
+		sem_wait(semaphore);
+		/* WRITE TABLE ON OCCASION */
+		if(*clockPtr % (unsigned long)50e9 == 0) writeTable("output.txt", rptr->resource, rptr->request, rptr->approved, resourceMax);	
+		sem_post(semaphore);
+
 		/* CREATE NEW PROCESS RANDOM CHANCE */
 		if(procTotal < max && *clockPtr >= 1e9){	
 			if(getRandomNumber(0,100) <= 20){
 				procC++;
-				procTotal++;		
+				procTotal++;	
 				while(procC >= 18){
 					signal(SIGINT, sigintHandler);
 					*clockPtr += 5e8;
@@ -95,13 +131,11 @@ int main(int argc, char * argv[]){
 					procC--;
 				}
 				char childName[128];
-				char maxProces[128];
 				char maxResour[128];
 				sprintf(childName, "%d", procTotal);
-				sprintf(maxProces, "%d", max);
 				sprintf(maxResour, "%d", resourceMax);
 				if((childPid = fork()) == 0){
-					char * args[] = {"./user", childName, maxProces, maxResour, '\0'};
+					char * args[] = {"./user", childName, maxResour, '\0'};
 					execvp("./user", args);
 				}
 			}
@@ -111,9 +145,8 @@ int main(int argc, char * argv[]){
 		* clockPtr += 5e8;
 
 		/* WILL INTERCEDE IN CHILD WHILE LOOP : EVERY SECOND */
-		if(procTotal > 0 && (*clockPtr % (unsigned long)1e9) == 0){
+		if((*clockPtr % ((unsigned long)1e9)) == 0){
 			int dupI = findDupUtility(resoPtr, max);
-			//writeOut("output.txt", *clockPtr, "");
 			if(dupI != -1){
 				/* FOUND A DUPLICATE */
 				resoPtr[dupI] = 0;
@@ -125,9 +158,27 @@ int main(int argc, char * argv[]){
 			sem_post(semaphore);
 		}
 		sem_post(semaphore);
+
+		/* APPROVE OR DENY RESOURCE REQUEST */
+		sem_wait(semaphore);
+		for(int i = 0; i < max; i++){
+			if(rptr->request[i] > -1){
+				int pname = i + 1;
+				int rReq = rptr->request[i];
+				if(rptr->resource[rReq] < 1 ){
+				/* DENY */
+					rptr->approved[pname-1] = 0;
+				}else{
+				/* APPROVE */
+					rptr->approved[pname-1] = 1;
+					rptr->resource[rReq] -= 1;
+				}
+			}
+		}
+		sem_post(semaphore);
+
 		/* BREAK OUT OF WHILE LOOP */
 		if(*clockPtr > 210e9 && procTotal >= max) break;
-
 	}
 	time_t start = time(NULL);
 	time_t stop;
@@ -136,9 +187,8 @@ int main(int argc, char * argv[]){
 		signal(SIGINT, sigintHandler);
 		*clockPtr += 5e8;
 		sem_wait(semaphore);
-		if(procTotal > 0 && *clockPtr % (unsigned long)1e9 == 0){
+		if(procTotal > 0 && *clockPtr % ((unsigned long)1e9) == 0){
 			int dupI = findDupUtility(resoPtr, max);
-			//writeString("output.txt", *clockPtr, "whilepid loop Deadlock Prevention is signaling a process to terminate.\n");
 			if(dupI != -1){
 				/* FOUND A DUPLICATE */
 				resoPtr[dupI] = 0;
@@ -148,28 +198,36 @@ int main(int argc, char * argv[]){
 			}
 		}
 		sem_post(semaphore);
-
-	wait(NULL);
 		/* COMMIT SUICIDE IF HUNG : TIMEOUT HANDLING */
 		stop = time(NULL);
-		if(stop - start > 90){
+		if(stop - start > 20){
 			printf("OSS: Timeout occured, shutting down.\n");			
 			printf("\nOSS: %d Processes total were made.\n", procTotal);
 			printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
 			sem_close(semaphore);
 			sem_unlink(sema);
 			sem_destroy(semaphore);
+			if(shmdt(rptr) == -1){
+				perror("Shared memory detach: shmdt()");
+				exit(1);}
+			if(shmctl(shm1, IPC_RMID, 0) == -1){
+				perror("Shared memory remove: shmctl()");
+				exit(1);}
 			shm_unlink("CLOCK");
 			shm_unlink("RESC");
 			shm_unlink("PIDS");
 			exit(0);
 		}
-
 	}
 	sem_wait(semaphore);	
+	
+	writeTable("output.txt", rptr->resource, rptr->request, rptr->approved, resourceMax);	
+
 	printf("\nOSS: %d Processes total were made. %d were killed due to deadlock prevention\n", procTotal, totalDeadlockKills);
 	printf("\tThere were %d different types of resources made available to children this run\n", resourceMax);
 	printf("\t\t--> OSS Terminated at %f <--\n", * clockPtr / 1e9);
+	
+
 	FILE *fp;
 	fp = fopen("output.txt", "a");
 	char wroteline[355];
@@ -177,10 +235,19 @@ int main(int argc, char * argv[]){
 	fprintf(fp, wroteline);
 	fclose(fp);
 
+	printTable(rptr->resource, rptr->request, rptr->approved, resourceMax);
+
 	sem_post(semaphore);
 	sem_close(semaphore);
 	sem_unlink(sema);
 	sem_destroy(semaphore);
+
+	if(shmdt(rptr) == -1){
+		perror("Shared memory detach: shmdt()");
+		exit(1);}		
+	if(shmctl(shm1, IPC_RMID, 0) == -1){
+		perror("Shared memory remove: shmctl()");
+		exit(1);}
 	shm_unlink("CLOCK");
 	shm_unlink("RESC");
 	shm_unlink("PIDS");
@@ -225,6 +292,34 @@ void writeOut(char * name, unsigned long time, char * string){
 	return;
 }
 
+void writeTable(char * name, int * resource, int * request, int * approved, int rSize){
+	FILE *fp;
+	fp = fopen(name, "a");
+	char temp[64];
+	char wroteline[512] = "";
+	strcat(wroteline, "\n\tTABLE FROM PARENT\n");
+
+	strcat(wroteline, "\t-------- ---------- RESOURCE TABLE ---------- --------\n\tResources:\t");
+	for(int i = 0; i < rSize; i++){
+		sprintf(temp, "%2d ", resource[i]);
+		strcat(wroteline, temp);
+	}
+	strcat(wroteline, "\n\tRequests:\t");
+	for(int i = 0; i < max; i++){
+		sprintf(temp, "%2d ", request[i]);
+		strcat(wroteline, temp);
+	}
+	strcat(wroteline, "\n\tApproved:\t");
+	for(int i = 0; i < max; i++){
+		sprintf(temp, "%2d ", approved[i]);
+		strcat(wroteline, temp);
+	}
+	strcat(wroteline, "\n\t-------- ---------- -------------- ---------- --------\n");
+	fprintf(fp, wroteline);
+	fclose(fp);
+	return;
+}
+
 void clearOldOutput(){
 	/* DELETE PREVIOUS LOG.TXT FILE */
 	int status1 = remove("output.txt");
@@ -234,18 +329,23 @@ void clearOldOutput(){
 	return;
 }
 
-void printTable(int * resource, int * request){
-	printf("\tTABLE FROM PARENT\n");
-	printf("\t---------- RESOURCE TABLE ----------\n\t");
-	for(int i = 0; i < 20; i++){
+void printTable(int * resource, int * request, int * approved, int rSize){
+	printf("\n\tTABLE FROM PARENT\n");
+	printf("\t-------- ---------- RESOURCE TABLE ---------- --------\n\t");
+	printf("Resources:\t");
+	for(int i = 0; i < rSize; i++){
 		printf("%2d ", resource[i]);
 	}
 	printf("\n\t");
-	for(int i = 0; i < 20; i++){
+	printf("Requests:\t");
+	for(int i = 0; i < max; i++){
 		printf("%2d ", request[i]);
 	}
-	printf("\n\t---------- -------------- ----------\n");
-	fflush(stdout);
+	printf("\n\tApproved:\t");
+	for(int i = 0; i < max; i++){
+		printf("%2d ", approved[i]);
+	}
+	printf("\n\t-------- ---------- -------------- ---------- --------\n");
 }
 
 int getRandomNumber(int low, int high){

@@ -21,9 +21,22 @@
 #include <sys/wait.h>
 #include <stdbool.h>
 
+#define max 50
+#define SHM_KEY 0x9893
 #define FLAGS O_RDWR
 #define PERMS (mode_t) (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
+struct rTable {
+	int request[max];
+	int approved[max];
+	int resource[max];
+};
+
+const size_t SHMSZ = sizeof(struct rTable);
+struct rTable * rptr;
+int shm1;
+
+void writeRequest(char * name, int child, unsigned long time, char * string);
 void writeOutDeadlock(char * name, int child, unsigned long time);
 void writeStringSuccess(char * name, int child, unsigned long time, char * string);
 void writeString(char * name, int child, unsigned long time, char * string);
@@ -44,8 +57,7 @@ int main(int argc, char * argv[]){
 	time_t start, stop;
 	start = time(NULL);
 	int pname = atoi(argv[1]);
-	int max = atoi(argv[2]);
-	int maxReso = atoi(argv[3]);
+	int maxReso = atoi(argv[2]);
 	size_t clockSize = sizeof(unsigned long) + 1;
 	size_t resoSize  = sizeof(int) * max;
 	sem_t * semaphore;
@@ -66,15 +78,23 @@ int main(int argc, char * argv[]){
 		perror("Failed to create named semaphore");
 		return 1;
 	}
+
+	/* LOCATE SEGMENT */
+	if((shm1 = shmget(SHM_KEY, SHMSZ, 0666)) < 0){
+		perror("Shared memory create: shmget()");
+		exit(1);}
+	if((rptr = shmat(shm1, NULL, 0)) == (void*) -1){
+		perror("Shared memory attach: shmat()");
+		exit(1);}
+
 	sem_wait(semaphore);
-	for(int i =0; i < 1e8/5; i++);
 	printf("-------- Child %2d:%5d Created ---------------------\n", pname, getpid());
 	fflush(stdout);
 	pidPtr[pname-1] = mypid;
+	usleep(100000);
 	sem_post(semaphore);
 	srand(mypid);
-	int bound = getRandomNumber(5,160);
-	usleep(100000);
+	int bound = getRandomNumber(1,160);
 	/* INFINITE LOOP */
 	while(1){
 		/* IF SIGNAL RECEIVED FROM PARENT TO TERMINATE */
@@ -82,7 +102,6 @@ int main(int argc, char * argv[]){
 			sem_wait(semaphore);
 			printf("\n>>> OSS Instructed %d:%d to terminate due to deadlock prevention.\n\n", pname, getpid());
 			writeOutDeadlock("output.txt", pname, *clockPtr);
-			writeOut("output.txt", pname, *clockPtr);
 			sem_post(semaphore);
 			break;
 		}
@@ -92,75 +111,85 @@ int main(int argc, char * argv[]){
 		if(diceRoll > 30 && *clockPtr > previousTime + (unsigned long)1e9/2){
 			diceRoll = getRandomNumber(0,100);
 			/* PROCESS REQUESTS A RESOURCE */
-			if(!requestedReso && diceRoll >= 50){
+			if(!requestedReso && diceRoll >= 6){
 				requestedReso = true;
 				releasedReso = false;
 				int randReso = getRandomNumber(1, maxReso);
 				sem_wait(semaphore);
-				writeString("output.txt", pname, *clockPtr, "child requesting resource");
+				writeRequest("output.txt", pname, *clockPtr, "REQUESTING");
 				printf("\t Child %2d:%5d requesting resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
-				fflush(stdout);
 				resoPtr[pname-1] = randReso;
 				sem_post(semaphore);
 				/* SLEEP THE PROCESS TO SIMULATE REQUEST WAIT TIME */
-				usleep(100000);
+				rptr->request[pname-1] = randReso;
+				usleep(250000);
+				if(rptr->approved[pname-1] == 0) usleep(1000000);
 			}
 			/* PROCESS RELEASES ITS RESOURCE (IF ACCEPTED BY PARENT)*/
-			else if(requestedReso && !releasedReso && start < start+10e9 && diceRoll <= 20) {
+			else if(requestedReso && !releasedReso) {
 				requestedReso = false;
 				releasedReso  = true;
 				sem_wait(semaphore);
-				writeString("output.txt", pname, *clockPtr, "child releasing resource");
 				resoPtr[pname-1] = 0;
 				printf("\t Child %2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
+				writeRequest("output.txt", pname, *clockPtr, "RELEASING");
 				sem_post(semaphore);
 			}
 			sem_wait(semaphore);
 			previousTime = *clockPtr;
 			sem_post(semaphore);
 		}
-
 		/* CHANCE PROCESS TERMINATES ITSELF (SUCCESS) */
 		sem_wait(semaphore);
 		diceRoll = getRandomNumber(0,100);
-		if(*clockPtr >= (unsigned long)bound*(unsigned long)1e9 && diceRoll <= 10){	
-			if(requestedReso == true) printf("\t Child %2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);	
+		if((*clockPtr >= (unsigned long)bound*((unsigned long)1e9) && diceRoll <= 5)){	
+			if(requestedReso == true){ 
+				printf("\t Child %2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
+				writeRequest("output.txt", pname, *clockPtr, "RELEASING");
+			}
 			printf("\t\t\t\t  -- Child %2d:%5d completes ----------------------\n", pname, getpid());
-			fflush(stdout);
-			writeStringSuccess("output.txt", pname, *clockPtr, "this is test");
-			writeOut("output.txt", pname, *clockPtr);
+			writeStringSuccess("output.txt", pname, *clockPtr, "");
 			resoPtr[pname-1] = 0;
 			sem_post(semaphore);
 			break;
 		}
 		sem_post(semaphore);
-
 		/* HANDLING HUNG LOOP - SAFEGUARD TIMEOUT KILLS PROCESS IF STUCK */
 		stop = time(NULL);
-		if(stop - start > 15){
-			printf("\t\tTimeout occured, killing %d:%d\n", pname, getpid());
-			r_wait(NULL);
-			sem_close(semaphore);
-			shm_unlink("CLOCK");
-			shm_unlink("RESC");
-			shm_unlink("REQU");
-			shm_unlink("PIDS");
-			sem_close(semaphore);
-			exit(0);
+		if(stop - start > 5){
+			if(requestedReso == true){ 
+				printf("\t Child %2d:%5d releasing resource at %.0lu:%lu\n", pname, getpid(), *clockPtr/(unsigned long)1e9, *clockPtr);
+				writeRequest("output.txt", pname, *clockPtr, "RELEASING");
+			}
+			printf("\t\t\t\t  -- Child %2d:%5d completes ----------------------\n", pname, getpid());
+			writeOutDeadlock("output.txt", pname, *clockPtr);
+			resoPtr[pname-1] = 0;
+			sem_post(semaphore);
+			break;
 		}
 	}
 	sem_post(semaphore);
 	if(r_wait(NULL) == -1){
-		return 1;
-	}
+		return 1;}
 	if(sem_close(semaphore) < 0){
-		perror("sem_close() error in child");
-	}
+		perror("sem_close() error in child");}
+	/* DETACH FROM SEGMENT */
+	if(shmdt(rptr) == -1){
+		perror("DETACHING SHARED MEMORY: shmdt()");
+		return 1;}	
 	shm_unlink("CLOCK");
 	shm_unlink("RESC");
-	shm_unlink("REQU");
 	shm_unlink("PIDS");
 	exit(0);
+}
+void writeRequest(char * name, int child, unsigned long time, char * string){
+	FILE *fp;
+	fp = fopen(name, "a");
+	char wroteline[355];
+	sprintf(wroteline, "\t\t\t\tUSER: Child%3d:%6d\t%s at %.0lu:%lu\n", child, getpid(), string, time/(unsigned long)1e9, time);
+	fprintf(fp, wroteline);
+	fclose(fp);
+	return;
 }
 
 void writeString(char * name, int child, unsigned long time, char * string){
@@ -177,7 +206,7 @@ void writeStringSuccess(char * name, int child, unsigned long time, char * strin
 	FILE *fp;
 	fp = fopen(name, "a");
 	char wroteline[355];
-	sprintf(wroteline, "\t  ---> USER Child %d:%d completed successfully.", child, getpid());
+	sprintf(wroteline, "\t  ---> USER Child %d:%d completed successfully.\t\tChild %d:%d terminated at %.0lu:%lu\n", child, getpid(), child, getpid(), time/(unsigned long)1e9, time);
 	fprintf(fp, wroteline);
 	fclose(fp);
 	return;
@@ -188,7 +217,7 @@ void writeOutDeadlock(char * name, int child, unsigned long time){
 	FILE *fp;
 	fp = fopen(name, "a");
 	char wroteline[355];
-	sprintf(wroteline, "  ---> OSS instructed Child %d:%d to terminate at %.0lu:%lu ", child, getpid(), time/(unsigned long)1e9, time);
+	sprintf(wroteline, "  ---> OSS instructed Child %d:%d to terminate at %.0lu:%lu\tChild %d:%d terminated at %.0lu:%lu\n", child, getpid(), time/(unsigned long)1e9, time, child, getpid(), time/(unsigned long)1e0, time);
 	fprintf(fp, wroteline);
 	fclose(fp);
 	return;
